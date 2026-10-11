@@ -1,0 +1,14 @@
+server:
+  addr: ':2003'
+  read_timeout: 10s
+  write_timeout: 30s
+
+database:
+  url: 'postgresql://postgres:password@localhost:5432/devboard?sslmode=disable'
+  max_conns: 25 # Number of cores * 2 or 4.
+  min_conns: 5
+  max_conn_lifetime: 1h
+  max_conn_idle_time: 30m
+
+app:
+  env: 'development'
