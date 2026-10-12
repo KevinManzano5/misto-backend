@@ -1,0 +1,2 @@
+ALTER TABLE stores 
+DROP CONSTRAINT IF EXISTS stores_name_key;

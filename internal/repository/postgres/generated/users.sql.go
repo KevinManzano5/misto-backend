@@ -25,11 +25,11 @@ RETURNING id, username, email, password_hash, first_name, last_name, is_active, 
 `
 
 type CreateUserParams struct {
-	Username     string  `json:"username"`
-	Email        string  `json:"email"`
-	PasswordHash string  `json:"password_hash"`
-	FirstName    *string `json:"first_name"`
-	LastName     *string `json:"last_name"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -188,8 +188,8 @@ RETURNING id, username, email, password_hash, first_name, last_name, is_active, 
 
 type UpdateUserParams struct {
 	ID        pgtype.UUID `json:"id"`
-	FirstName *string     `json:"first_name"`
-	LastName  *string     `json:"last_name"`
+	FirstName string      `json:"first_name"`
+	LastName  string      `json:"last_name"`
 	IsActive  bool        `json:"is_active"`
 }
 

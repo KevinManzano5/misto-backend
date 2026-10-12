@@ -34,8 +34,8 @@ func (repository *UserRepository) Create(ctx context.Context, user *domain.User)
 		Username:     user.Username,
 		Email:        user.Email,
 		PasswordHash: user.PasswordHash,
-		FirstName:    &user.FirstName,
-		LastName:     &user.LastName,
+		FirstName:    user.FirstName,
+		LastName:     user.LastName,
 	})
 
 	if err != nil {
@@ -91,14 +91,15 @@ func (repository *UserRepository) GetByEmail(ctx context.Context, email string) 
 	return toDomainUser(result), nil
 }
 
+// toDomainUser
 func toDomainUser(user postgres.User) *domain.User {
 	return &domain.User{
 		ID:           user.ID.String(),
 		Username:     user.Username,
 		Email:        user.Email,
 		PasswordHash: user.PasswordHash,
-		FirstName:    *user.FirstName,
-		LastName:     *user.LastName,
+		FirstName:    user.FirstName,
+		LastName:     user.LastName,
 		IsActive:     user.IsActive,
 		CreatedAt:    user.CreatedAt.Time,
 		UpdatedAt:    user.UpdatedAt.Time,

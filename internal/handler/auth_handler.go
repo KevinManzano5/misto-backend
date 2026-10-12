@@ -81,65 +81,65 @@ func toTokenResponse(tokens *usecase.AuthTokens) tokenResponse {
 // @Failure     400     {object} ProblemDetails
 // @Failure     409     {object} ProblemDetails
 // @Router      /auth/register [post]
-func (h *AuthHandler) SignUp(w http.ResponseWriter, r *http.Request) {
-	if r.Body == nil {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+func (handler *AuthHandler) SignUp(writer http.ResponseWriter, request *http.Request) {
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
 
 	defer func() {
-		if err := r.Body.Close(); err != nil {
-			h.logger.ErrorContext(
-				r.Context(),
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
 				"failed to close request body",
 				"error", err,
-				"method", r.Method,
-				"path", r.URL.Path,
+				"method", request.Method,
+				"path", request.URL.Path,
 			)
 		}
 	}()
 
 	var req signUpRequest
 
-	decoder := json.NewDecoder(r.Body)
+	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&req); err != nil {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
 
 	if decoder.More() {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
 
-	if errors := h.validator.Validate(req); errors != nil {
-		if err := RespondValidationError(w, errors); err != nil {
-			h.logger.ErrorContext(
-				r.Context(),
+	if errors := handler.validator.Validate(req); errors != nil {
+		if err := RespondValidationError(writer, errors); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
 				"error trying to create validation response",
 				"error", err,
-				"method", r.Method,
-				"path", r.URL.Path,
+				"method", request.Method,
+				"path", request.URL.Path,
 			)
 		}
 		return
 	}
 
-	tokens, err := h.usecase.SignUp(r.Context(), req.Username, req.Email, req.FirstName, req.LastName, req.Password)
+	tokens, err := handler.usecase.SignUp(request.Context(), req.Username, req.Email, req.FirstName, req.LastName, req.Password)
 	if err != nil {
-		RespondError(w, r, h.logger, err)
+		RespondError(writer, request, handler.logger, err)
 		return
 	}
 
-	if err := RespondJSON(w, http.StatusCreated, toTokenResponse(tokens)); err != nil {
-		h.logger.ErrorContext(
-			r.Context(),
+	if err := RespondJSON(writer, http.StatusCreated, toTokenResponse(tokens)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
 			"error trying to create response JSON",
 			"error", err,
-			"method", r.Method,
-			"path", r.URL.Path,
+			"method", request.Method,
+			"path", request.URL.Path,
 		)
 	}
 }
@@ -155,42 +155,42 @@ func (h *AuthHandler) SignUp(w http.ResponseWriter, r *http.Request) {
 // @Success     200     {object} tokenResponse
 // @Failure     401     {object} ProblemDetails
 // @Router      /auth/login [post]
-func (h *AuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
+func (handler *AuthHandler) SignIn(writer http.ResponseWriter, request *http.Request) {
 	var req signInRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+	if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
 
-	if errors := h.validator.Validate(req); errors != nil {
-		if err := RespondValidationError(w, errors); err != nil {
-			h.logger.ErrorContext(
-				r.Context(),
+	if errors := handler.validator.Validate(req); errors != nil {
+		if err := RespondValidationError(writer, errors); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
 				"error trying to create validation response",
 				"error", err,
-				"method", r.Method,
-				"path", r.URL.Path,
+				"method", request.Method,
+				"path", request.URL.Path,
 			)
 		}
 		return
 	}
 
-	tokens, err := h.usecase.SignIn(r.Context(), req.Email, req.Password)
+	tokens, err := handler.usecase.SignIn(request.Context(), req.Email, req.Password)
 
 	if err != nil {
-		RespondError(w, r, h.logger, err)
+		RespondError(writer, request, handler.logger, err)
 
 		return
 	}
 
-	if err := RespondJSON(w, http.StatusOK, toTokenResponse(tokens)); err != nil {
-		h.logger.ErrorContext(
-			r.Context(),
+	if err := RespondJSON(writer, http.StatusOK, toTokenResponse(tokens)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
 			"error trying to create response JSON",
 			"error", err,
-			"method", r.Method,
-			"path", r.URL.Path,
+			"method", request.Method,
+			"path", request.URL.Path,
 		)
 	}
 }
@@ -206,43 +206,43 @@ func (h *AuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
 // @Success     200     {object} tokenResponse
 // @Failure     401     {object} ProblemDetails
 // @Router      /auth/refresh [post]
-func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+func (handler *AuthHandler) Refresh(writer http.ResponseWriter, request *http.Request) {
 	var req refreshRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+	if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 
 		return
 	}
 
-	if errors := h.validator.Validate(req); errors != nil {
-		if err := RespondValidationError(w, errors); err != nil {
-			h.logger.ErrorContext(
-				r.Context(),
+	if errors := handler.validator.Validate(req); errors != nil {
+		if err := RespondValidationError(writer, errors); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
 				"error trying to create validation response",
 				"error", err,
-				"method", r.Method,
-				"path", r.URL.Path,
+				"method", request.Method,
+				"path", request.URL.Path,
 			)
 		}
 		return
 	}
 
-	tokens, err := h.usecase.RefreshTokens(r.Context(), req.RefreshToken)
+	tokens, err := handler.usecase.RefreshTokens(request.Context(), req.RefreshToken)
 
 	if err != nil {
-		RespondError(w, r, h.logger, err)
+		RespondError(writer, request, handler.logger, err)
 
 		return
 	}
 
-	if err := RespondJSON(w, http.StatusOK, toTokenResponse(tokens)); err != nil {
-		h.logger.ErrorContext(
-			r.Context(),
+	if err := RespondJSON(writer, http.StatusOK, toTokenResponse(tokens)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
 			"error trying to create response JSON",
 			"error", err,
-			"method", r.Method,
-			"path", r.URL.Path,
+			"method", request.Method,
+			"path", request.URL.Path,
 		)
 	}
 }
@@ -257,20 +257,20 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 // @Param       request body refreshRequest true "Refresh token to revoke"
 // @Success     204     "Without content"
 // @Router      /auth/logout [post]
-func (h *AuthHandler) SignOut(w http.ResponseWriter, r *http.Request) {
+func (handler *AuthHandler) SignOut(writer http.ResponseWriter, request *http.Request) {
 	var req logoutRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		RespondError(w, r, h.logger, domain.ErrInvalidInput)
+	if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 
 		return
 	}
 
-	if err := h.usecase.SignOut(r.Context(), req.RefreshToken); err != nil {
-		RespondError(w, r, h.logger, err)
+	if err := handler.usecase.SignOut(request.Context(), req.RefreshToken); err != nil {
+		RespondError(writer, request, handler.logger, err)
 
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	writer.WriteHeader(http.StatusNoContent)
 }

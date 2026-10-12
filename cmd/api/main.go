@@ -91,15 +91,18 @@ func main() {
 	tokenStore := auth.NewTokenStore(redisClient)
 
 	userRepo := postgres.NewUserRepository(pool)
+	storeRepo := postgres.NewStoreRepository(pool)
 
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
+	storeUC := usecase.NewStoreUseCase(storeRepo)
 
 	validate := validator.New()
 
 	healthHandler := handler.NewHealthHandler()
 	userHandler := handler.NewUserHandler(userUC, validate, log)
 	authHandler := handler.NewAuthHandler(authUC, validate, log)
+	storeHandler := handler.NewStoreHandler(storeUC, validate, log)
 
 	server := server.New(":2003",
 		server.WithLogger(log),
@@ -108,7 +111,7 @@ func main() {
 	)
 
 	// * Middleware Auth
-	// authMW := middlewares.RequireAuth(jwtManager, log)
+	authMW := middlewares.RequireAuth(jwtManager, log)
 
 	// * Public routes
 	server.RegisterRoutes("GET /docs/", httpSwagger.WrapHandler)
@@ -118,6 +121,10 @@ func main() {
 	server.RegisterRoutes("POST /api/v1/auth/sign_out", http.HandlerFunc(authHandler.SignOut))
 	server.RegisterRoutes("POST /api/v1/auth/refresh", http.HandlerFunc(authHandler.Refresh))
 	server.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(userHandler.Get))
+
+	// * Private routes
+	server.RegisterRoutes("POST /api/v1/stores", middlewares.Chain(http.HandlerFunc(storeHandler.Create), authMW))
+	server.RegisterRoutes("GET /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.GetStoreByID), authMW))
 
 	// * Protected routes
 	server.UseChain(

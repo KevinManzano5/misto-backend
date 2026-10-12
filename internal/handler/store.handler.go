@@ -1,0 +1,172 @@
+package handler
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/KevinManzano5/misto-backend/internal/domain"
+	"github.com/KevinManzano5/misto-backend/internal/middlewares"
+	"github.com/KevinManzano5/misto-backend/internal/usecase"
+	"github.com/KevinManzano5/misto-backend/internal/validator"
+)
+
+// StoreHandler struct
+type StoreHandler struct {
+	usecase   *usecase.StoreUseCase
+	validator *validator.Validator
+	logger    *slog.Logger
+}
+
+// NewStoreHandler constructor
+func NewStoreHandler(usecase *usecase.StoreUseCase, validator *validator.Validator, logger *slog.Logger) *StoreHandler {
+	return &StoreHandler{
+		usecase:   usecase,
+		validator: validator,
+		logger:    logger,
+	}
+}
+
+type createStoreRequest struct {
+	Name        string `json:"name" validate:"required,min=2,max=30"`
+	Description string `json:"description" validate:"required"`
+}
+
+type storeResponse struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	IsActive    bool      `json:"is_active"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func toStoreResponse(store *domain.Store) storeResponse {
+	return storeResponse{
+		ID:          store.ID,
+		UserID:      store.UserID,
+		Name:        store.Name,
+		Description: store.Description,
+		IsActive:    store.IsActive,
+		CreatedAt:   store.CreatedAt,
+		UpdatedAt:   store.UpdatedAt,
+	}
+}
+
+// Create endpoint
+//
+// @Summary     Register a new store
+// @Description Creates a new store
+// @Tags        store
+// @Accept      json
+// @Produce     json
+// @Param       request body     registerRequest true "Register data"
+// @Success     201     {object} tokenResponse
+// @Failure     400     {object} ProblemDetails
+// @Failure     409     {object} ProblemDetails
+// @Router      /auth/register [post]
+func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Request) {
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req createStoreRequest
+
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if decoder.More() {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if errors := handler.validator.Validate(req); errors != nil {
+		if err := RespondValidationError(writer, errors); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"error trying to create validation response",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+		return
+	}
+
+	userID := middlewares.GetUserID(request)
+
+	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusCreated, toStoreResponse(store)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to create response JSON",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// GetStoreByID endpoint
+//
+// @Summary     Register a new store
+// @Description Creates a new store
+// @Tags        store
+// @Accept      json
+// @Produce     json
+// @Param       request body     registerRequest true "Register data"
+// @Success     201     {object} tokenResponse
+// @Failure     400     {object} ProblemDetails
+// @Failure     409     {object} ProblemDetails
+// @Router      /auth/register [post]
+func (handler *StoreHandler) GetStoreByID(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	store, err := handler.usecase.GetByID(request.Context(), id)
+
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+
+		return
+	}
+
+	if err := respondJSON(writer, http.StatusOK, toStoreResponse(store)); err != nil {
+		handler.logger.Error(
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+func (handler *StoreHandler) GetStoreByUserID() {}
+
+func (handler *StoreHandler) UpdateStore() {}
+
+func (handler *StoreHandler) DeleteStore() {}

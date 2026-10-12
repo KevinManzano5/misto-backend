@@ -25,12 +25,7 @@ func NewUserHandler(usecase *usecase.UserUseCase, validator *validator.Validator
 	}
 }
 
-type createUserRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Name     string `json:"name" validate:"required,min=2,max=100"`
-	Password string `json:"password" validate:"required,min=8"`
-}
-
+// userResponse struct
 type userResponse struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`

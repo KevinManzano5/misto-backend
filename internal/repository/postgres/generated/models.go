@@ -8,13 +8,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Store struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Name        string             `json:"name"`
+	Description *string            `json:"description"`
+	IsActive    bool               `json:"is_active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type User struct {
 	ID           pgtype.UUID        `json:"id"`
 	Username     string             `json:"username"`
 	Email        string             `json:"email"`
 	PasswordHash string             `json:"password_hash"`
-	FirstName    *string            `json:"first_name"`
-	LastName     *string            `json:"last_name"`
+	FirstName    string             `json:"first_name"`
+	LastName     string             `json:"last_name"`
 	IsActive     bool               `json:"is_active"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
