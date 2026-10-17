@@ -125,6 +125,8 @@ func main() {
 	// * Private routes
 	server.RegisterRoutes("POST /api/v1/stores", middlewares.Chain(http.HandlerFunc(storeHandler.Create), authMW))
 	server.RegisterRoutes("GET /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.GetStoreByID), authMW))
+	server.RegisterRoutes("PATCH /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.UpdateStore), authMW))
+	server.RegisterRoutes("DELETE /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.DeleteStore), authMW))
 
 	// * Protected routes
 	server.UseChain(
