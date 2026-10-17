@@ -18,6 +18,7 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/server"
 	"github.com/KevinManzano5/misto-backend/internal/usecase"
 	"github.com/KevinManzano5/misto-backend/internal/validator"
+	"github.com/joho/godotenv"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -30,7 +31,12 @@ import (
 func main() {
 	log := setupLogger()
 
-	dbURL := os.Getenv("DATABASE_URL")
+	if err := godotenv.Load(); err != nil {
+		log.Error(".env file not found")
+	}
+
+	port := os.Getenv("PORT")
+	dbURL := os.Getenv("DB_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 
 	pool, err := postgres.NewPool(context.Background(), postgres.Config{
@@ -104,7 +110,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authUC, validate, log)
 	storeHandler := handler.NewStoreHandler(storeUC, validate, log)
 
-	server := server.New(":2003",
+	server := server.New(port,
 		server.WithLogger(log),
 		server.WithReadTimeout(15*time.Second),
 		server.WithWriteTimeout(30*time.Second),
