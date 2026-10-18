@@ -94,6 +94,7 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	return updatedStore, nil
 }
 
+// Delete method
 func (usecase *StoreUseCase) Delete(ctx context.Context, storeID string) error {
 	err := usecase.repo.DeleteStore(ctx, storeID)
 

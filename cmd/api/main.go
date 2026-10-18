@@ -98,10 +98,12 @@ func main() {
 
 	userRepo := postgres.NewUserRepository(pool)
 	storeRepo := postgres.NewStoreRepository(pool)
+	appointmentRepo := postgres.NewAppointmentRepository(pool)
 
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo)
 
 	validate := validator.New()
 
@@ -109,6 +111,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userUC, validate, log)
 	authHandler := handler.NewAuthHandler(authUC, validate, log)
 	storeHandler := handler.NewStoreHandler(storeUC, validate, log)
+	appointmentHandler := handler.NewAppointmentHandler(appointmentUC, validate, log)
 
 	server := server.New(port,
 		server.WithLogger(log),
@@ -133,6 +136,7 @@ func main() {
 	server.RegisterRoutes("GET /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.GetStoreByID), authMW))
 	server.RegisterRoutes("PATCH /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.UpdateStore), authMW))
 	server.RegisterRoutes("DELETE /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.DeleteStore), authMW))
+	server.RegisterRoutes("POST /api/v1/appointments", middlewares.Chain(http.HandlerFunc(appointmentHandler.Create), authMW))
 
 	// * Protected routes
 	server.UseChain(
