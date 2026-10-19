@@ -14,6 +14,7 @@ type StoreRepository interface {
 	GetStoreByUserID(ctx context.Context, userID string) (*domain.Store, error)
 	UpdateStore(ctx context.Context, store *domain.Store) error
 	DeleteStore(ctx context.Context, id string) error
+	ListStores(ctx context.Context) ([]*domain.Store, error)
 }
 
 // StoreUseCase struct
@@ -61,6 +62,17 @@ func (usecase *StoreUseCase) GetByUserID(ctx context.Context, userID string) (*d
 	return store, nil
 }
 
+// List method
+func (usecase *StoreUseCase) List(ctx context.Context) ([]*domain.Store, error) {
+	stores, err := usecase.repo.ListStores(ctx)
+
+	if err != nil {
+		return nil, fmt.Errorf("listing stores: %w", err)
+	}
+
+	return stores, nil
+}
+
 // Update method applies the supplied changes to a store and returns the persisted store.
 func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
@@ -94,6 +106,7 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	return updatedStore, nil
 }
 
+// Delete method
 func (usecase *StoreUseCase) Delete(ctx context.Context, storeID string) error {
 	err := usecase.repo.DeleteStore(ctx, storeID)
 
