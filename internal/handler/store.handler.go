@@ -321,3 +321,38 @@ func (handler *StoreHandler) DeleteStore(writer http.ResponseWriter, request *ht
 		)
 	}
 }
+
+// ListStores endpoint
+//
+// @Summary     List all active stores
+// @Description Retrieves an array of all active stores in the system
+// @Tags        store
+// @Produce     json
+// @Success     200     {array}  storeResponse
+// @Failure     500     {object} ProblemDetails
+// @Router      /stores [get]
+func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *http.Request) {
+	stores, err := handler.usecase.List(request.Context())
+
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	// We initialize the slice as empty rather than nil to ensure that the JSON returns [] instead of null.
+	response := make([]storeResponse, 0)
+	for _, store := range stores {
+		response = append(response, toStoreResponse(store))
+	}
+
+	// We use RespondJSON (the capitalized version you have in your Create/Update)
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}

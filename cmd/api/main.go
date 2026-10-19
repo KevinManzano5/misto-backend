@@ -130,10 +130,11 @@ func main() {
 	server.RegisterRoutes("POST /api/v1/auth/sign_out", http.HandlerFunc(authHandler.SignOut))
 	server.RegisterRoutes("POST /api/v1/auth/refresh", http.HandlerFunc(authHandler.Refresh))
 	server.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(userHandler.Get))
+	server.RegisterRoutes("GET /api/v1/stores/{id}", http.HandlerFunc(storeHandler.GetStoreByID))
+	server.RegisterRoutes("GET /api/v1/stores", http.HandlerFunc(storeHandler.ListStores))
 
 	// * Private routes
 	server.RegisterRoutes("POST /api/v1/stores", middlewares.Chain(http.HandlerFunc(storeHandler.Create), authMW))
-	server.RegisterRoutes("GET /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.GetStoreByID), authMW))
 	server.RegisterRoutes("PATCH /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.UpdateStore), authMW))
 	server.RegisterRoutes("DELETE /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.DeleteStore), authMW))
 	server.RegisterRoutes("POST /api/v1/appointments", middlewares.Chain(http.HandlerFunc(appointmentHandler.Create), authMW))

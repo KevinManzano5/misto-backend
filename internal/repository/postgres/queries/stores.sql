@@ -8,6 +8,12 @@ INSERT INTO stores (
 )
 RETURNING *;
 
+-- name: ListStoresPaginated :many
+SELECT * FROM stores
+WHERE deleted_at IS NULL
+ORDER BY name ASC
+LIMIT $1 OFFSET $2;
+
 -- name: GetStoreByID :one
 SELECT * FROM stores
 WHERE id = $1 

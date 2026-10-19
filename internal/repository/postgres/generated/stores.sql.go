@@ -105,6 +105,47 @@ func (q *Queries) GetStoreByUserID(ctx context.Context, userID pgtype.UUID) (Sto
 	return i, err
 }
 
+const listStoresPaginated = `-- name: ListStoresPaginated :many
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at FROM stores
+WHERE deleted_at IS NULL
+ORDER BY name ASC
+LIMIT $1 OFFSET $2
+`
+
+type ListStoresPaginatedParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListStoresPaginated(ctx context.Context, arg ListStoresPaginatedParams) ([]Store, error) {
+	rows, err := q.db.Query(ctx, listStoresPaginated, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Store{}
+	for rows.Next() {
+		var i Store
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Description,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateStore = `-- name: UpdateStore :one
 UPDATE stores
 SET

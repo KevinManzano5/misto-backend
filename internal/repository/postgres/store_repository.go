@@ -155,3 +155,26 @@ func (repo *StoreRepository) DeleteStore(ctx context.Context, id string) error {
 
 	return nil
 }
+
+// ListStores method
+func (repo *StoreRepository) ListStores(ctx context.Context) ([]*domain.Store, error) {
+	results, err := repo.queries.ListStoresPaginated(ctx, postgres.ListStoresPaginatedParams{
+		Limit:  10,
+		Offset: 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing stores: %w", err)
+	}
+
+	var stores []*domain.Store
+	for _, store := range results {
+		stores = append(stores, toDomainStore(store))
+	}
+
+	// If there are no results, we return an initialized empty slice instead of nil.
+	if stores == nil {
+		stores = make([]*domain.Store, 0)
+	}
+
+	return stores, nil
+}
