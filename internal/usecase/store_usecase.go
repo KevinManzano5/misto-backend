@@ -116,3 +116,107 @@ func (usecase *StoreUseCase) Delete(ctx context.Context, storeID string) error {
 
 	return nil
 }
+
+// StoreServiceRepository interface
+type StoreServiceRepository interface {
+	CreateStoreService(ctx context.Context, service *domain.StoreService) error
+	GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error)
+	ListStoreServicesByStoreID(ctx context.Context, storeID string) ([]*domain.StoreService, error)
+	UpdateStoreService(ctx context.Context, service *domain.StoreService) error
+	DeleteStoreService(ctx context.Context, id string) error
+}
+
+// StoreServiceUseCase struct
+type StoreServiceUseCase struct {
+	repo StoreServiceRepository
+}
+
+// NewStoreServiceUseCase constructor
+func NewStoreServiceUseCase(repo StoreServiceRepository) *StoreServiceUseCase {
+	return &StoreServiceUseCase{
+		repo: repo,
+	}
+}
+
+// Create method
+func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, name, description string, durationMinutes int32, price float64, isActive bool) (*domain.StoreService, error) {
+	service := domain.NewStoreService(storeID, name, description, durationMinutes, price, isActive)
+
+	if !service.IsValid() {
+		return nil, domain.ErrInvalidInput
+	}
+
+	if err := usecase.repo.CreateStoreService(ctx, service); err != nil {
+		return nil, fmt.Errorf("creating store service: %w", err)
+	}
+
+	return service, nil
+}
+
+// GetByID method
+func (usecase *StoreServiceUseCase) GetByID(ctx context.Context, serviceID string) (*domain.StoreService, error) {
+	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store service: %w", err)
+	}
+
+	return service, nil
+}
+
+// ListByStoreID method
+func (usecase *StoreServiceUseCase) ListByStoreID(ctx context.Context, storeID string) ([]*domain.StoreService, error) {
+	services, err := usecase.repo.ListStoreServicesByStoreID(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing store services by store id: %w", err)
+	}
+
+	return services, nil
+}
+
+// Update method
+func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID string, name, description *string, durationMinutes *int32, price *float64, isActive *bool) (*domain.StoreService, error) {
+	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store service to update: %w", err)
+	}
+
+	if name != nil {
+		service.Name = *name
+	}
+	if description != nil {
+		service.Description = *description
+	}
+	if durationMinutes != nil {
+		service.DurationMinutes = *durationMinutes
+	}
+	if price != nil {
+		service.Price = *price
+	}
+	if isActive != nil {
+		service.IsActive = *isActive
+	}
+
+	if !service.IsValid() {
+		return nil, domain.ErrInvalidInput
+	}
+
+	if err := usecase.repo.UpdateStoreService(ctx, service); err != nil {
+		return nil, fmt.Errorf("updating store service: %w", err)
+	}
+
+	updatedService, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("getting updated store service: %w", err)
+	}
+
+	return updatedService, nil
+}
+
+// Delete method
+func (usecase *StoreServiceUseCase) Delete(ctx context.Context, serviceID string) error {
+	if err := usecase.repo.DeleteStoreService(ctx, serviceID); err != nil {
+		return fmt.Errorf("deleting store service: %w", err)
+	}
+
+	return nil
+}

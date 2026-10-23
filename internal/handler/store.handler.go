@@ -356,3 +356,188 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		)
 	}
 }
+
+// StoreServiceHandler struct
+type StoreServiceHandler struct {
+	usecase   *usecase.StoreServiceUseCase
+	validator *validator.Validator
+	logger    *slog.Logger
+}
+
+// NewStoreServiceHandler constructor
+func NewStoreServiceHandler(usecase *usecase.StoreServiceUseCase, validator *validator.Validator, logger *slog.Logger) *StoreServiceHandler {
+	return &StoreServiceHandler{
+		usecase:   usecase,
+		validator: validator,
+		logger:    logger,
+	}
+}
+
+type createStoreServiceRequest struct {
+	Name            string  `json:"name" validate:"required,min=2,max=100"`
+	Description     string  `json:"description"`
+	DurationMinutes int32   `json:"duration_minutes" validate:"required,min=1"`
+	Price           float64 `json:"price" validate:"min=0"`
+}
+
+type updateStoreServiceRequest struct {
+	Name            *string  `json:"name" validate:"omitempty,min=2,max=100"`
+	Description     *string  `json:"description"`
+	DurationMinutes *int32   `json:"duration_minutes" validate:"omitempty,min=1"`
+	Price           *float64 `json:"price" validate:"omitempty,min=0"`
+	IsActive        *bool    `json:"is_active"`
+}
+
+type storeServiceResponse struct {
+	ID              string    `json:"id"`
+	StoreID         string    `json:"store_id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	DurationMinutes int32     `json:"duration_minutes"`
+	Price           float64   `json:"price"`
+	IsActive        bool      `json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func toStoreServiceResponse(service *domain.StoreService) storeServiceResponse {
+	return storeServiceResponse{
+		ID:              service.ID,
+		StoreID:         service.StoreID,
+		Name:            service.Name,
+		Description:     service.Description,
+		DurationMinutes: service.DurationMinutes,
+		Price:           service.Price,
+		IsActive:        service.IsActive,
+		CreatedAt:       service.CreatedAt,
+		UpdatedAt:       service.UpdatedAt,
+	}
+}
+
+// Create endpoint (e.g., POST /stores/{storeId}/services)
+func (handler *StoreServiceHandler) Create(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		_ = request.Body.Close()
+	}()
+
+	var req createStoreServiceRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if errors := handler.validator.Validate(req); errors != nil {
+		_ = RespondValidationError(writer, errors)
+		return
+	}
+
+	service, err := handler.usecase.Create(request.Context(), storeID, req.Name, req.Description, req.DurationMinutes, req.Price, true)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusCreated, toStoreServiceResponse(service)); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write response", "error", err)
+	}
+}
+
+// GetByID endpoint (e.g., GET /services/{id})
+func (handler *StoreServiceHandler) GetByID(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	service, err := handler.usecase.GetByID(request.Context(), id)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, toStoreServiceResponse(service)); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write response", "error", err)
+	}
+}
+
+// ListByStoreID endpoint (e.g., GET /stores/{storeId}/services)
+func (handler *StoreServiceHandler) ListByStoreID(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	services, err := handler.usecase.ListByStoreID(request.Context(), storeID)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]storeServiceResponse, 0)
+	for _, svc := range services {
+		response = append(response, toStoreServiceResponse(svc))
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write response", "error", err)
+	}
+}
+
+// Update endpoint (e.g., PATCH /services/{id})
+func (handler *StoreServiceHandler) Update(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		_ = request.Body.Close()
+	}()
+
+	var req updateStoreServiceRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if req.Name == nil && req.Description == nil && req.DurationMinutes == nil && req.Price == nil && req.IsActive == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrors := handler.validator.Validate(req); validationErrors != nil {
+		_ = RespondValidationError(writer, validationErrors)
+		return
+	}
+
+	service, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.DurationMinutes, req.Price, req.IsActive)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, toStoreServiceResponse(service)); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write response", "error", err)
+	}
+}
+
+// Delete endpoint (e.g., DELETE /services/{id})
+func (handler *StoreServiceHandler) Delete(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	if err := handler.usecase.Delete(request.Context(), id); err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, "store service deleted"); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write response", "error", err)
+	}
+}

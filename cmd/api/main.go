@@ -98,11 +98,13 @@ func main() {
 
 	userRepo := postgres.NewUserRepository(pool)
 	storeRepo := postgres.NewStoreRepository(pool)
+	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
 
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo)
+	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo)
 	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo)
 
 	validate := validator.New()
@@ -111,6 +113,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userUC, validate, log)
 	authHandler := handler.NewAuthHandler(authUC, validate, log)
 	storeHandler := handler.NewStoreHandler(storeUC, validate, log)
+	storeServiceHandler := handler.NewStoreServiceHandler(storeServiceUC, validate, log)
 	appointmentHandler := handler.NewAppointmentHandler(appointmentUC, validate, log)
 
 	server := server.New(port,
@@ -132,11 +135,16 @@ func main() {
 	server.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(userHandler.Get))
 	server.RegisterRoutes("GET /api/v1/stores/{id}", http.HandlerFunc(storeHandler.GetStoreByID))
 	server.RegisterRoutes("GET /api/v1/stores", http.HandlerFunc(storeHandler.ListStores))
+	server.RegisterRoutes("GET /api/v1/stores/{storeId}/services", http.HandlerFunc(storeServiceHandler.ListByStoreID))
+	server.RegisterRoutes("GET /api/v1/services/{id}", http.HandlerFunc(storeServiceHandler.GetByID))
 
 	// * Private routes
 	server.RegisterRoutes("POST /api/v1/stores", middlewares.Chain(http.HandlerFunc(storeHandler.Create), authMW))
 	server.RegisterRoutes("PATCH /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.UpdateStore), authMW))
 	server.RegisterRoutes("DELETE /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.DeleteStore), authMW))
+	server.RegisterRoutes("POST /api/v1/stores/{storeId}/services", middlewares.Chain(http.HandlerFunc(storeServiceHandler.Create), authMW))
+	server.RegisterRoutes("PATCH /api/v1/services/{id}", middlewares.Chain(http.HandlerFunc(storeServiceHandler.Update), authMW))
+	server.RegisterRoutes("DELETE /api/v1/services/{id}", middlewares.Chain(http.HandlerFunc(storeServiceHandler.Delete), authMW))
 	server.RegisterRoutes("POST /api/v1/appointments", middlewares.Chain(http.HandlerFunc(appointmentHandler.Create), authMW))
 
 	// * Protected routes
