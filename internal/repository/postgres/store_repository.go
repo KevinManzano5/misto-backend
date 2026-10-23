@@ -178,3 +178,179 @@ func (repo *StoreRepository) ListStores(ctx context.Context) ([]*domain.Store, e
 
 	return stores, nil
 }
+
+// StoreServiceRepository struct
+type StoreServiceRepository struct {
+	pool    *pgxpool.Pool
+	queries *postgres.Queries
+}
+
+// NewStoreServiceRepository function
+func NewStoreServiceRepository(pool *pgxpool.Pool) *StoreServiceRepository {
+	return &StoreServiceRepository{
+		pool:    pool,
+		queries: postgres.New(pool),
+	}
+}
+
+// toDomainStoreService function
+func toDomainStoreService(service postgres.StoreService) *domain.StoreService {
+	// Converting pgtype.Numeric to float64 (Assuming your domain uses float64 for Price)
+	var price float64
+	if service.Price.Valid {
+		fV, _ := service.Price.Float64Value()
+		price = fV.Float64
+	}
+
+	var desc string
+	if service.Description != nil {
+		desc = *service.Description
+	}
+
+	return &domain.StoreService{
+		ID:              service.ID.String(),
+		StoreID:         service.StoreID.String(),
+		Name:            service.Name,
+		Description:     desc,
+		Price:           price,
+		DurationMinutes: service.DurationMinutes,
+		IsActive:        service.IsActive,
+		CreatedAt:       service.CreatedAt.Time,
+		UpdatedAt:       service.UpdatedAt.Time,
+	}
+}
+
+// CreateStoreService method
+func (repo *StoreServiceRepository) CreateStoreService(ctx context.Context, service *domain.StoreService) error {
+	var storeID pgtype.UUID
+	if err := storeID.Scan(service.StoreID); err != nil {
+		return fmt.Errorf("invalid store_id: %w", domain.ErrInvalidInput)
+	}
+
+	// Configure Numeric for the price
+	var price pgtype.Numeric
+	if err := price.Scan(fmt.Sprintf("%f", service.Price)); err != nil {
+		return fmt.Errorf("invalid price: %w", err)
+	}
+
+	result, err := repo.queries.CreateStoreService(ctx, postgres.CreateStoreServiceParams{
+		StoreID:         storeID,
+		Name:            service.Name,
+		Description:     &service.Description,
+		Price:           price,
+		DurationMinutes: service.DurationMinutes,
+	})
+
+	if err != nil {
+		return fmt.Errorf("creating store service: %w", err)
+	}
+
+	service.ID = result.ID.String()
+	service.CreatedAt = result.CreatedAt.Time
+	service.UpdatedAt = result.UpdatedAt.Time
+
+	return nil
+}
+
+// GetStoreServiceByID method
+func (repo *StoreServiceRepository) GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error) {
+	var serviceID pgtype.UUID
+
+	if err := serviceID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.GetStoreServiceByID(ctx, serviceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("service with id %s: %w", id, domain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("getting store service %s: %w", id, err)
+	}
+
+	return toDomainStoreService(result), nil
+}
+
+// ListStoreServicesByStoreID method
+func (repo *StoreServiceRepository) ListStoreServicesByStoreID(ctx context.Context, storeID string) ([]*domain.StoreService, error) {
+	var sID pgtype.UUID
+
+	if err := sID.Scan(storeID); err != nil {
+		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+
+	results, err := repo.queries.ListStoreServicesByStoreID(ctx, sID)
+	if err != nil {
+		return nil, fmt.Errorf("listing store services: %w", err)
+	}
+
+	services := make([]*domain.StoreService, 0)
+	for _, s := range results {
+		services = append(services, toDomainStoreService(s))
+	}
+
+	return services, nil
+}
+
+// UpdateStoreService method
+func (repo *StoreServiceRepository) UpdateStoreService(ctx context.Context, service *domain.StoreService) error {
+	var serviceID pgtype.UUID
+	if err := serviceID.Scan(service.ID); err != nil {
+		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
+	}
+
+	var price pgtype.Numeric
+	_ = price.Scan(fmt.Sprintf("%f", service.Price))
+
+	// We prepare the pointers for the optional fields (sqlc.narg)
+	var namePtr *string
+	if service.Name != "" {
+		namePtr = &service.Name
+	}
+
+	var descPtr *string
+	if service.Description != "" {
+		descPtr = &service.Description
+	}
+
+	var durationPtr *int32
+	if service.DurationMinutes > 0 {
+		durationPtr = &service.DurationMinutes
+	}
+
+	isActivePtr := &service.IsActive
+
+	_, err := repo.queries.UpdateStoreService(ctx, postgres.UpdateStoreServiceParams{
+		ID:              serviceID,
+		Name:            namePtr,
+		Description:     descPtr,
+		Price:           price,
+		DurationMinutes: durationPtr,
+		IsActive:        isActivePtr,
+	})
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("service with id %s: %w", serviceID, domain.ErrNotFound)
+		}
+		return fmt.Errorf("updating store service %s: %w", serviceID, err)
+	}
+
+	return nil
+}
+
+// DeleteStoreService method
+func (repo *StoreServiceRepository) DeleteStoreService(ctx context.Context, id string) error {
+	var serviceID pgtype.UUID
+
+	if err := serviceID.Scan(id); err != nil {
+		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
+	}
+
+	err := repo.queries.DeleteStoreService(ctx, serviceID)
+	if err != nil {
+		return fmt.Errorf("deleting store service: %w", err)
+	}
+
+	return nil
+}
