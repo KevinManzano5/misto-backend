@@ -32,9 +32,50 @@ func toDomainStore(store postgres.Store) *domain.Store {
 	}
 }
 
+// StoreServiceRepository struct
+type StoreServiceRepository struct {
+	pool    *pgxpool.Pool
+	queries *postgres.Queries
+}
+
 // NewStoreRepository function
 func NewStoreRepository(pool *pgxpool.Pool) *StoreRepository {
 	return &StoreRepository{
+		pool:    pool,
+		queries: postgres.New(pool),
+	}
+}
+
+// toDomainStoreService function
+func toDomainStoreService(service postgres.StoreService) *domain.StoreService {
+	// Converting pgtype.Numeric to float64 (Assuming your domain uses float64 for Price)
+	var price float64
+	if service.Price.Valid {
+		fV, _ := service.Price.Float64Value()
+		price = fV.Float64
+	}
+
+	var desc string
+	if service.Description != nil {
+		desc = *service.Description
+	}
+
+	return &domain.StoreService{
+		ID:              service.ID.String(),
+		StoreID:         service.StoreID.String(),
+		Name:            service.Name,
+		Description:     desc,
+		Price:           price,
+		DurationMinutes: service.DurationMinutes,
+		IsActive:        service.IsActive,
+		CreatedAt:       service.CreatedAt.Time,
+		UpdatedAt:       service.UpdatedAt.Time,
+	}
+}
+
+// NewStoreServiceRepository function
+func NewStoreServiceRepository(pool *pgxpool.Pool) *StoreServiceRepository {
+	return &StoreServiceRepository{
 		pool:    pool,
 		queries: postgres.New(pool),
 	}
@@ -159,8 +200,8 @@ func (repo *StoreRepository) DeleteStore(ctx context.Context, id string) error {
 // ListStores method
 func (repo *StoreRepository) ListStores(ctx context.Context) ([]*domain.Store, error) {
 	results, err := repo.queries.ListStoresPaginated(ctx, postgres.ListStoresPaginatedParams{
-		Limit:  10,
-		Offset: 1,
+		Limit:  100,
+		Offset: 0,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing stores: %w", err)
@@ -177,47 +218,6 @@ func (repo *StoreRepository) ListStores(ctx context.Context) ([]*domain.Store, e
 	}
 
 	return stores, nil
-}
-
-// StoreServiceRepository struct
-type StoreServiceRepository struct {
-	pool    *pgxpool.Pool
-	queries *postgres.Queries
-}
-
-// NewStoreServiceRepository function
-func NewStoreServiceRepository(pool *pgxpool.Pool) *StoreServiceRepository {
-	return &StoreServiceRepository{
-		pool:    pool,
-		queries: postgres.New(pool),
-	}
-}
-
-// toDomainStoreService function
-func toDomainStoreService(service postgres.StoreService) *domain.StoreService {
-	// Converting pgtype.Numeric to float64 (Assuming your domain uses float64 for Price)
-	var price float64
-	if service.Price.Valid {
-		fV, _ := service.Price.Float64Value()
-		price = fV.Float64
-	}
-
-	var desc string
-	if service.Description != nil {
-		desc = *service.Description
-	}
-
-	return &domain.StoreService{
-		ID:              service.ID.String(),
-		StoreID:         service.StoreID.String(),
-		Name:            service.Name,
-		Description:     desc,
-		Price:           price,
-		DurationMinutes: service.DurationMinutes,
-		IsActive:        service.IsActive,
-		CreatedAt:       service.CreatedAt.Time,
-		UpdatedAt:       service.UpdatedAt.Time,
-	}
 }
 
 // CreateStoreService method
