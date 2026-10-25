@@ -31,6 +31,17 @@ type Store struct {
 	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type StoreSchedule struct {
+	ID        pgtype.UUID        `json:"id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	DayOfWeek int32              `json:"day_of_week"`
+	OpenTime  pgtype.Time        `json:"open_time"`
+	CloseTime pgtype.Time        `json:"close_time"`
+	IsClosed  bool               `json:"is_closed"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type StoreService struct {
 	ID              pgtype.UUID        `json:"id"`
 	StoreID         pgtype.UUID        `json:"store_id"`

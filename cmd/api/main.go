@@ -87,13 +87,14 @@ func main() {
 	storeRepo := postgres.NewStoreRepository(pool)
 	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
+	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
-	storeUC := usecase.NewStoreUseCase(storeRepo)
+	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
 	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo)
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo)
 
 	// Utility configuration
 	validate := validator.New()

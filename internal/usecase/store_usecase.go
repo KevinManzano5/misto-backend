@@ -17,15 +17,24 @@ type StoreRepository interface {
 	ListStores(ctx context.Context) ([]*domain.Store, error)
 }
 
+// ScheduleRepository interface
+type ScheduleRepository interface {
+	UpsertStoreSchedule(ctx context.Context, schedule *domain.StoreSchedule) error
+	GetStoreScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error)
+	ListStoreSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error)
+}
+
 // StoreUseCase struct
 type StoreUseCase struct {
-	repo StoreRepository
+	repo         StoreRepository
+	scheduleRepo ScheduleRepository
 }
 
 // NewStoreUseCase constructor
-func NewStoreUseCase(repo StoreRepository) *StoreUseCase {
+func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *StoreUseCase {
 	return &StoreUseCase{
-		repo: repo,
+		repo:         repo,
+		scheduleRepo: scheduleRepo,
 	}
 }
 
@@ -115,6 +124,41 @@ func (usecase *StoreUseCase) Delete(ctx context.Context, storeID string) error {
 	}
 
 	return nil
+}
+
+// UpsertSchedule method creates or updates the schedule of a store for a specific day
+func (usecase *StoreUseCase) UpsertSchedule(ctx context.Context, storeID string, dayOfWeek int32, openTime, closeTime string, isClosed bool) (*domain.StoreSchedule, error) {
+	schedule := domain.NewStoreSchedule(storeID, dayOfWeek, openTime, closeTime, isClosed)
+
+	if !schedule.IsValid() {
+		return nil, domain.ErrInvalidInput
+	}
+
+	if err := usecase.scheduleRepo.UpsertStoreSchedule(ctx, schedule); err != nil {
+		return nil, fmt.Errorf("upserting store schedule: %w", err)
+	}
+
+	return schedule, nil
+}
+
+// GetScheduleByDay method retrieves the schedule of a store for a specific day
+func (usecase *StoreUseCase) GetScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error) {
+	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
+	if err != nil {
+		return nil, fmt.Errorf("getting store schedule: %w", err)
+	}
+
+	return schedule, nil
+}
+
+// ListSchedules method retrieves all schedules for a store
+func (usecase *StoreUseCase) ListSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error) {
+	schedules, err := usecase.scheduleRepo.ListStoreSchedules(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing store schedules: %w", err)
+	}
+
+	return schedules, nil
 }
 
 // StoreServiceRepository interface

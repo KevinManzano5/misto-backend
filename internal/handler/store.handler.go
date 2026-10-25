@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
@@ -49,6 +50,46 @@ type storeResponse struct {
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type upsertStoreScheduleRequest struct {
+	OpenTime  string `json:"open_time" validate:"omitempty"`
+	CloseTime string `json:"close_time" validate:"omitempty"`
+	IsClosed  bool   `json:"is_closed"`
+}
+
+type storeScheduleResponse struct {
+	ID        string    `json:"id"`
+	StoreID   string    `json:"store_id"`
+	DayOfWeek int32     `json:"day_of_week"`
+	OpenTime  string    `json:"open_time"`
+	CloseTime string    `json:"close_time"`
+	IsClosed  bool      `json:"is_closed"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func toStoreScheduleResponse(schedule *domain.StoreSchedule) storeScheduleResponse {
+	return storeScheduleResponse{
+		ID:        schedule.ID,
+		StoreID:   schedule.StoreID,
+		DayOfWeek: schedule.DayOfWeek,
+		OpenTime:  schedule.OpenTime,
+		CloseTime: schedule.CloseTime,
+		IsClosed:  schedule.IsClosed,
+		CreatedAt: schedule.CreatedAt,
+		UpdatedAt: schedule.UpdatedAt,
+	}
+}
+
+// parseDayOfWeek converts the {day} path value to a valid day-of-week (0=Sunday..6=Saturday).
+func parseDayOfWeek(value string) (int32, error) {
+	day, err := strconv.Atoi(value)
+	if err != nil || day < 0 || day > 6 {
+		return 0, domain.ErrInvalidInput
+	}
+
+	return int32(day), nil
 }
 
 type createStoreServiceRequest struct {
@@ -329,6 +370,124 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 	response := make([]storeResponse, 0)
 	for _, store := range stores {
 		response = append(response, toStoreResponse(store))
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// UpsertSchedule endpoint (e.g., PUT /stores/{storeId}/schedules/{day})
+func (handler *StoreHandler) UpsertSchedule(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	dayOfWeek, err := parseDayOfWeek(request.PathValue("day"))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req upsertStoreScheduleRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if errs := handler.validator.Validate(req); errs != nil {
+		if err := RespondValidationError(writer, errs); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"error trying to create validation response",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+		return
+	}
+
+	schedule, err := handler.usecase.UpsertSchedule(request.Context(), storeID, dayOfWeek, req.OpenTime, req.CloseTime, req.IsClosed)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, toStoreScheduleResponse(schedule)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to create response JSON",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// GetScheduleByDay endpoint (e.g., GET /stores/{storeId}/schedules/{day})
+func (handler *StoreHandler) GetScheduleByDay(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	dayOfWeek, err := parseDayOfWeek(request.PathValue("day"))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	schedule, err := handler.usecase.GetScheduleByDay(request.Context(), storeID, dayOfWeek)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, toStoreScheduleResponse(schedule)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// ListSchedules endpoint (e.g., GET /stores/{storeId}/schedules)
+func (handler *StoreHandler) ListSchedules(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	schedules, err := handler.usecase.ListSchedules(request.Context(), storeID)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]storeScheduleResponse, 0)
+	for _, schedule := range schedules {
+		response = append(response, toStoreScheduleResponse(schedule))
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {

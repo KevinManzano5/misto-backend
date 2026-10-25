@@ -61,6 +61,14 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, service *
 	srv.RegisterRoutes("PATCH /api/v1/stores/{id}", withAuth(store.UpdateStore))
 	srv.RegisterRoutes("DELETE /api/v1/stores/{id}", withAuth(store.DeleteStore))
 
+	// === Store schedules routes ===
+	// Public
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/schedules", http.HandlerFunc(store.ListSchedules))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/schedules/{day}", http.HandlerFunc(store.GetScheduleByDay))
+
+	// Private
+	srv.RegisterRoutes("PUT /api/v1/stores/{storeId}/schedules/{day}", withAuth(store.UpsertSchedule))
+
 	// === Store services routes ===
 	// Public
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/services", http.HandlerFunc(service.ListByStoreID))
