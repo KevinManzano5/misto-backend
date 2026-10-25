@@ -19,10 +19,10 @@ ORDER BY name ASC;
 -- name: CheckAppointmentOverlap :one
 -- Check whether there is any active appointment whose time interval overlaps with the new requested range.
 SELECT COUNT(*) FROM appointments
-WHERE store_id = $1
+WHERE store_id = sqlc.arg(store_id)
   AND status != 'cancelled'
-  AND start_time < $3  -- The existing appointment begins before the new one ends.
-  AND end_time > $2;   -- The existing appointment ends after the new one begins.
+  AND start_time < sqlc.arg(new_end_time)    -- The existing appointment begins before the new one ends.
+  AND end_time > sqlc.arg(new_start_time);   -- The existing appointment ends after the new one begins.
 
 -- name: CreateAppointment :one
 INSERT INTO appointments (

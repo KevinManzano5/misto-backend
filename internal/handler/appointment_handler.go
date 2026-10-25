@@ -3,11 +3,13 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
+	"github.com/KevinManzano5/misto-backend/internal/middlewares"
 	"github.com/KevinManzano5/misto-backend/internal/usecase"
 	"github.com/KevinManzano5/misto-backend/internal/validator"
 )
@@ -30,11 +32,9 @@ func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, validator *valid
 
 // createAppointmentRequest struct
 type createAppointmentRequest struct {
-	StoreID         string    `json:"store_id" validate:"required,uuid"`
-	ServiceID       string    `json:"service_id" validate:"required,uuid"`
-	ClientID        string    `json:"client_id" validate:"required,uuid"`
-	StartTime       time.Time `json:"start_time" validate:"required"`
-	DurationMinutes int       `json:"duration_minutes" validate:"required,gt=0"`
+	StoreID   string    `json:"store_id" validate:"required,uuid"`
+	ServiceID string    `json:"service_id" validate:"required,uuid"`
+	StartTime time.Time `json:"start_time" validate:"required"`
 }
 
 // appointmentResponse struct
@@ -84,6 +84,8 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&req); err != nil {
+		fmt.Println(err)
+
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
@@ -107,9 +109,8 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 		request.Context(),
 		req.StoreID,
 		req.ServiceID,
-		req.ClientID,
+		middlewares.GetUserID(request),
 		req.StartTime,
-		req.DurationMinutes,
 	)
 
 	if err != nil {

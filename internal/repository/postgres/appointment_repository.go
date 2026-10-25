@@ -9,6 +9,7 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/domain"
 	postgres "github.com/KevinManzano5/misto-backend/internal/repository/postgres/generated"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -42,32 +43,9 @@ func NewAppointmentRepository(pool *pgxpool.Pool) *AppointmentRepository {
 	}
 }
 
-// CheckOverlap method
-// Returns true if there is an appointment that overlaps with the specified time slot.
-func (repo *AppointmentRepository) CheckOverlap(ctx context.Context, storeID string, startTime, endTime time.Time) (bool, error) {
-	var sID pgtype.UUID
-
-	if err := sID.Scan(storeID); err != nil {
-		return false, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
-	}
-
-	start := pgtype.Timestamptz{Time: startTime, Valid: true}
-	end := pgtype.Timestamptz{Time: endTime, Valid: true}
-
-	count, err := repo.queries.CheckAppointmentOverlap(ctx, postgres.CheckAppointmentOverlapParams{
-		StoreID:   sID,
-		StartTime: start,
-		EndTime:   end,
-	})
-
-	if err != nil {
-		return false, fmt.Errorf("checking appointment overlap: %w", err)
-	}
-
-	return count > 0, nil
-}
-
-// CreateAppointment method
+// CreateAppointment method atomically checks the requested time slot for a conflict and
+// inserts the appointment within a single transaction, so a concurrent request for the same
+// slot can never slip past the overlap check before either insert commits.
 func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appointment *domain.Appointment) error {
 	var storeID, serviceID, clientID pgtype.UUID
 
@@ -84,16 +62,42 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 	start := pgtype.Timestamptz{Time: appointment.StartTime, Valid: true}
 	end := pgtype.Timestamptz{Time: appointment.EndTime, Valid: true}
 
-	result, err := repo.queries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
+	tx, err := repo.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning appointment transaction: %w", err)
+	}
+	defer func() {
+		// Rollback is a safe no-op (pgx.ErrTxClosed) once the transaction has already been committed below.
+		_ = tx.Rollback(ctx)
+	}()
+
+	txQueries := repo.queries.WithTx(tx)
+
+	count, err := txQueries.CheckAppointmentOverlap(ctx, postgres.CheckAppointmentOverlapParams{
+		StoreID:      storeID,
+		NewStartTime: start,
+		NewEndTime:   end,
+	})
+	if err != nil {
+		return fmt.Errorf("checking appointment overlap: %w", err)
+	}
+	if count > 0 {
+		return fmt.Errorf("%w: time slot already booked", domain.ErrAlreadyExists)
+	}
+
+	result, err := txQueries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
 		StoreID:   storeID,
 		ServiceID: serviceID,
 		ClientID:  clientID,
 		StartTime: start,
 		EndTime:   end,
 	})
-
 	if err != nil {
-		return fmt.Errorf("creating appointment: %w", err)
+		return translateAppointmentWriteError(err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing appointment creation: %w", err)
 	}
 
 	appointment.ID = result.ID.String()
@@ -102,6 +106,22 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 	appointment.UpdatedAt = result.UpdatedAt.Time
 
 	return nil
+}
+
+// translateAppointmentWriteError maps known Postgres constraint violations from inserting an
+// appointment to the shared domain sentinel errors.
+func translateAppointmentWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23503": // foreign_key_violation: store_id, service_id or client_id does not reference an existing row
+			return fmt.Errorf("%w: referenced store, service or client does not exist", domain.ErrInvalidInput)
+		case "23505": // unique_violation
+			return fmt.Errorf("%w", domain.ErrAlreadyExists)
+		}
+	}
+
+	return fmt.Errorf("creating appointment: %w", err)
 }
 
 // ListAppointmentsByStoreDate method

@@ -94,7 +94,7 @@ func main() {
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
 	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo)
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeServiceRepo)
 
 	// Utility configuration
 	validate := validator.New()
