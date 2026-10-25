@@ -4,10 +4,10 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
+	"github.com/KevinManzano5/misto-backend/cmd/api/router"
 	_ "github.com/KevinManzano5/misto-backend/docs"
 	"github.com/KevinManzano5/misto-backend/internal/auth"
 	"github.com/KevinManzano5/misto-backend/internal/cache"
@@ -19,7 +19,6 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/usecase"
 	"github.com/KevinManzano5/misto-backend/internal/validator"
 	"github.com/joho/godotenv"
-	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // @title Devboard API
@@ -46,37 +45,26 @@ func main() {
 		MaxConnLifetime: 1 * time.Hour,
 		MaxConnIdleTime: 30 * time.Minute,
 	})
-
 	if err != nil {
 		log.Error("db connection failed", slog.Any("error", err))
-
 		os.Exit(1)
 	}
-
 	defer pool.Close()
-
 	log.Info("db connection success")
 
 	redisClient, err := cache.NewClient(context.Background(), cache.Config{
 		Addr:    redisAddr,
 		Timeout: 5 * time.Second,
 	})
-
 	if err != nil {
 		log.Error("redis connection failed", slog.Any("error", err))
-
 		os.Exit(1)
 	}
-
 	defer func() {
 		if err := redisClient.Close(); err != nil {
-			log.Error(
-				"redis connection cannot be closed",
-				slog.Any("error", err),
-			)
+			log.Error("redis connection cannot be closed", slog.Any("error", err))
 		}
 	}()
-
 	log.Info("redis connection success")
 
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -87,60 +75,39 @@ func main() {
 		AccessTokenDuration:  15 * time.Minute,
 		RefreshTokenDuration: refreshTokenDuration,
 	})
-
 	if err != nil {
 		log.Error("error configuring JWT", slog.Any("error", err))
-
 		os.Exit(1)
 	}
 
 	tokenStore := auth.NewTokenStore(redisClient)
 
+	// Instantiation of repositories
 	userRepo := postgres.NewUserRepository(pool)
 	storeRepo := postgres.NewStoreRepository(pool)
+	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
+	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
 
+	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
-	storeUC := usecase.NewStoreUseCase(storeRepo)
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo)
+	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
+	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo)
 
+	// Utility configuration
 	validate := validator.New()
 
-	healthHandler := handler.NewHealthHandler()
-	userHandler := handler.NewUserHandler(userUC, validate, log)
-	authHandler := handler.NewAuthHandler(authUC, validate, log)
-	storeHandler := handler.NewStoreHandler(storeUC, validate, log)
-	appointmentHandler := handler.NewAppointmentHandler(appointmentUC, validate, log)
-
-	server := server.New(port,
+	// Server configuration
+	srv := server.New(port,
 		server.WithLogger(log),
 		server.WithReadTimeout(15*time.Second),
 		server.WithWriteTimeout(30*time.Second),
 	)
 
-	// * Middleware Auth
-	authMW := middlewares.RequireAuth(jwtManager, log)
-
-	// * Public routes
-	server.RegisterRoutes("GET /docs/", httpSwagger.WrapHandler)
-	server.RegisterRoutes("GET /health", healthHandler)
-	server.RegisterRoutes("POST /api/v1/auth/sign_up", http.HandlerFunc(authHandler.SignUp))
-	server.RegisterRoutes("POST /api/v1/auth/sign_in", http.HandlerFunc(authHandler.SignIn))
-	server.RegisterRoutes("POST /api/v1/auth/sign_out", http.HandlerFunc(authHandler.SignOut))
-	server.RegisterRoutes("POST /api/v1/auth/refresh", http.HandlerFunc(authHandler.Refresh))
-	server.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(userHandler.Get))
-	server.RegisterRoutes("GET /api/v1/stores/{id}", http.HandlerFunc(storeHandler.GetStoreByID))
-	server.RegisterRoutes("GET /api/v1/stores", http.HandlerFunc(storeHandler.ListStores))
-
-	// * Private routes
-	server.RegisterRoutes("POST /api/v1/stores", middlewares.Chain(http.HandlerFunc(storeHandler.Create), authMW))
-	server.RegisterRoutes("PATCH /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.UpdateStore), authMW))
-	server.RegisterRoutes("DELETE /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(storeHandler.DeleteStore), authMW))
-	server.RegisterRoutes("POST /api/v1/appointments", middlewares.Chain(http.HandlerFunc(appointmentHandler.Create), authMW))
-
-	// * Protected routes
-	server.UseChain(
+	// Global middlewares
+	srv.UseChain(
 		middlewares.Recovery(log),
 		middlewares.Logger(log),
 		middlewares.SecurityHeaders(middlewares.SecurityConfig{
@@ -151,7 +118,24 @@ func main() {
 		}),
 	)
 
-	if err := server.Start(); err != nil {
+	// Grouping of handlers
+	handlers := &router.AppHandlers{
+		Health:       handler.NewHealthHandler(),
+		User:         handler.NewUserHandler(userUC, validate, log),
+		Auth:         handler.NewAuthHandler(authUC, validate, log),
+		Store:        handler.NewStoreHandler(storeUC, validate, log),
+		StoreService: handler.NewStoreServiceHandler(storeServiceUC, appointmentUC, validate, log),
+		Appointment:  handler.NewAppointmentHandler(appointmentUC, validate, log),
+	}
+
+	// Initialization of specific middlewares
+	authMW := middlewares.RequireAuth(jwtManager, log)
+
+	// Routing injection
+	router.SetupRoutes(srv, handlers, authMW)
+
+	// Server startup
+	if err := srv.Start(); err != nil {
 		log.Error("fatal error", "error", err)
 		os.Exit(1)
 	}
@@ -161,6 +145,5 @@ func setupLogger() *slog.Logger {
 	if os.Getenv("GO_ENV") == "production" {
 		return logger.New(logger.ProductionConfig())
 	}
-
 	return logger.New(logger.DefaultConfig())
 }
