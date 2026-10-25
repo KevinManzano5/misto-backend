@@ -15,19 +15,19 @@ const checkAppointmentOverlap = `-- name: CheckAppointmentOverlap :one
 SELECT COUNT(*) FROM appointments
 WHERE store_id = $1
   AND status != 'cancelled'
-  AND start_time < $3  -- The existing appointment begins before the new one ends.
-  AND end_time > $2
+  AND start_time < $2    -- The existing appointment begins before the new one ends.
+  AND end_time > $3
 `
 
 type CheckAppointmentOverlapParams struct {
-	StoreID   pgtype.UUID        `json:"store_id"`
-	EndTime   pgtype.Timestamptz `json:"end_time"`
-	StartTime pgtype.Timestamptz `json:"start_time"`
+	StoreID      pgtype.UUID        `json:"store_id"`
+	NewEndTime   pgtype.Timestamptz `json:"new_end_time"`
+	NewStartTime pgtype.Timestamptz `json:"new_start_time"`
 }
 
 // Check whether there is any active appointment whose time interval overlaps with the new requested range.
 func (q *Queries) CheckAppointmentOverlap(ctx context.Context, arg CheckAppointmentOverlapParams) (int64, error) {
-	row := q.db.QueryRow(ctx, checkAppointmentOverlap, arg.StoreID, arg.EndTime, arg.StartTime)
+	row := q.db.QueryRow(ctx, checkAppointmentOverlap, arg.StoreID, arg.NewEndTime, arg.NewStartTime)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

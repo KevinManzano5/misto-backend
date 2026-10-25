@@ -11,7 +11,7 @@ import (
 
 // AppointmentRepository interface
 type AppointmentRepository interface {
-	CheckOverlap(ctx context.Context, storeID string, startTime, endTime time.Time) (bool, error)
+	// CreateAppointment atomically checks for a scheduling conflict and inserts the appointment.
 	CreateAppointment(ctx context.Context, appointment *domain.Appointment) error
 	ListAppointmentsByStoreDate(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error)
 }
@@ -25,31 +25,33 @@ type StoreScheduleRepository interface {
 type AppointmentUseCase struct {
 	repo         AppointmentRepository
 	scheduleRepo StoreScheduleRepository
+	serviceRepo  StoreServiceRepository
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, serviceRepo StoreServiceRepository) *AppointmentUseCase {
 	return &AppointmentUseCase{
 		repo:         repo,
 		scheduleRepo: scheduleRepo,
+		serviceRepo:  serviceRepo,
 	}
 }
 
 // Create method
-func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceID, userID string, startTime time.Time, durationMinutes int) (*domain.Appointment, error) {
+func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceID, userID string, startTime time.Time) (*domain.Appointment, error) {
 	if startTime.Before(time.Now()) {
 		return nil, fmt.Errorf("%w: cannot schedule an appointment in the past", domain.ErrInvalidInput)
 	}
 
-	endTime := startTime.Add(time.Duration(durationMinutes) * time.Minute)
-
-	isOverlapping, err := usecase.repo.CheckOverlap(ctx, storeID, startTime, endTime)
+	service, err := usecase.serviceRepo.GetStoreServiceByID(ctx, serviceID)
 	if err != nil {
-		return nil, fmt.Errorf("checking availability: %w", err)
+		return nil, fmt.Errorf("getting store service: %w", err)
 	}
 
-	if isOverlapping {
-		return nil, fmt.Errorf("%w: time slot already booked", domain.ErrAlreadyExists)
+	endTime := startTime.Add(time.Duration(service.DurationMinutes) * time.Minute)
+
+	if err := usecase.validateWithinStoreSchedule(ctx, storeID, startTime, endTime); err != nil {
+		return nil, err
 	}
 
 	appointment := domain.NewAppointment(storeID, serviceID, userID, "", startTime, endTime)
@@ -59,6 +61,54 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 	}
 
 	return appointment, nil
+}
+
+// validateWithinStoreSchedule ensures the requested [startTime, endTime) range falls entirely
+// within the store's configured opening hours for that day of the week.
+func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Context, storeID string, startTime, endTime time.Time) error {
+	dayOfWeek := int32(startTime.Weekday())
+
+	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("%w: store has no schedule configured for this day", domain.ErrInvalidInput)
+		}
+		return fmt.Errorf("getting store schedule: %w", err)
+	}
+
+	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
+		return fmt.Errorf("%w: store is closed on this day", domain.ErrInvalidInput)
+	}
+
+	openTime, err := parseScheduleClockTime(startTime, schedule.OpenTime)
+	if err != nil {
+		return fmt.Errorf("parsing store open time: %w", err)
+	}
+
+	closeTime, err := parseScheduleClockTime(startTime, schedule.CloseTime)
+	if err != nil {
+		return fmt.Errorf("parsing store close time: %w", err)
+	}
+
+	if startTime.Before(openTime) || endTime.After(closeTime) {
+		return fmt.Errorf("%w: appointment falls outside store opening hours", domain.ErrInvalidInput)
+	}
+
+	return nil
+}
+
+// parseScheduleClockTime combines a "HH:MM" or "HH:MM:SS" clock string (as stored on a
+// StoreSchedule) with the date portion of date, in date's location.
+func parseScheduleClockTime(date time.Time, clock string) (time.Time, error) {
+	parsed, err := time.Parse("15:04:05", clock)
+	if err != nil {
+		parsed, err = time.Parse("15:04", clock)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("%w: invalid schedule time %q", domain.ErrInvalidInput, clock)
+		}
+	}
+
+	return time.Date(date.Year(), date.Month(), date.Day(), parsed.Hour(), parsed.Minute(), 0, 0, date.Location()), nil
 }
 
 // ListByStoreDate method
@@ -98,17 +148,15 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 	}
 
 	// 3. Convert the schedule text strings into actual date objects for that day
-	openParsed, _ := time.Parse("15:04:05", schedule.OpenTime)
-	if openParsed.IsZero() {
-		openParsed, _ = time.Parse("15:04", schedule.OpenTime)
-	}
-	closeParsed, _ := time.Parse("15:04:05", schedule.CloseTime)
-	if closeParsed.IsZero() {
-		closeParsed, _ = time.Parse("15:04", schedule.CloseTime)
+	openTime, err := parseScheduleClockTime(targetDate, schedule.OpenTime)
+	if err != nil {
+		return nil, fmt.Errorf("parsing store open time: %w", err)
 	}
 
-	openTime := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), openParsed.Hour(), openParsed.Minute(), 0, 0, targetDate.Location())
-	closeTime := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), closeParsed.Hour(), closeParsed.Minute(), 0, 0, targetDate.Location())
+	closeTime, err := parseScheduleClockTime(targetDate, schedule.CloseTime)
+	if err != nil {
+		return nil, fmt.Errorf("parsing store close time: %w", err)
+	}
 
 	// 4. Get the appointments scheduled for that ENTIRE day
 	startOfDay := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, targetDate.Location())
