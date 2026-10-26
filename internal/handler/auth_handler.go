@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
+	"github.com/KevinManzano5/misto-backend/internal/middlewares"
 	"github.com/KevinManzano5/misto-backend/internal/usecase"
 	"github.com/KevinManzano5/misto-backend/internal/validator"
 )
@@ -49,6 +50,14 @@ type refreshRequest struct {
 // logoutRequest struct
 type logoutRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+// validateTokenResponse struct
+type validateTokenResponse struct {
+	Valid  bool   `json:"valid"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
 }
 
 // tokenResponse struct
@@ -237,6 +246,36 @@ func (handler *AuthHandler) Refresh(writer http.ResponseWriter, request *http.Re
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, toTokenResponse(tokens)); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to create response JSON",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// ValidateToken endpoint
+//
+// @Summary     Validate access token
+// @Description Checks whether the provided access token is valid. Mounted behind the auth
+// @Description middleware, so reaching this handler already proves the token is valid; an
+// @Description invalid, expired or missing token never reaches it and gets a 401 instead.
+// @Tags        auth
+// @Produce     json
+// @Success     200 {object} validateTokenResponse
+// @Failure     401 {object} ProblemDetails
+// @Router      /auth/validate [get]
+func (handler *AuthHandler) ValidateToken(writer http.ResponseWriter, request *http.Request) {
+	claims := middlewares.GetClaims(request)
+
+	if err := RespondJSON(writer, http.StatusOK, validateTokenResponse{
+		Valid:  true,
+		UserID: claims.UserID,
+		Email:  claims.Email,
+		Role:   claims.Role,
+	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to create response JSON",

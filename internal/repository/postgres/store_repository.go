@@ -112,6 +112,75 @@ func (repo *StoreRepository) CreateStore(ctx context.Context, store *domain.Stor
 	return nil
 }
 
+// CreateStoreWithSchedules creates a store and its default weekly schedule atomically, so a
+// failure inserting any schedule row rolls back the store creation instead of leaving a store
+// without a configured schedule.
+func (repo *StoreRepository) CreateStoreWithSchedules(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error {
+	var userID pgtype.UUID
+
+	if err := userID.Scan(store.UserID); err != nil {
+		return fmt.Errorf("invalid created_by: %w", domain.ErrInvalidInput)
+	}
+
+	tx, err := repo.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning store creation transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	txQueries := repo.queries.WithTx(tx)
+
+	result, err := txQueries.CreateStore(ctx, postgres.CreateStoreParams{
+		UserID:      userID,
+		Name:        store.Name,
+		Description: &store.Description,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("%w", domain.ErrAlreadyExists)
+		}
+
+		return fmt.Errorf("creating store: %w", err)
+	}
+
+	store.ID = result.ID.String()
+	store.CreatedAt = result.CreatedAt.Time
+	store.UpdatedAt = result.UpdatedAt.Time
+
+	var storeID pgtype.UUID
+	if err := storeID.Scan(store.ID); err != nil {
+		return fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+
+	for _, schedule := range schedules {
+		scheduleResult, err := txQueries.UpsertStoreSchedule(ctx, postgres.UpsertStoreScheduleParams{
+			StoreID:   storeID,
+			DayOfWeek: schedule.DayOfWeek,
+			OpenTime:  toPgTime(schedule.OpenTime),
+			CloseTime: toPgTime(schedule.CloseTime),
+			IsClosed:  schedule.IsClosed,
+		})
+		if err != nil {
+			return fmt.Errorf("creating default schedule for day %d: %w", schedule.DayOfWeek, err)
+		}
+
+		schedule.ID = scheduleResult.ID.String()
+		schedule.StoreID = store.ID
+		schedule.CreatedAt = scheduleResult.CreatedAt.Time
+		schedule.UpdatedAt = scheduleResult.UpdatedAt.Time
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing store creation: %w", err)
+	}
+
+	return nil
+}
+
 // GetStoreByID method
 func (repo *StoreRepository) GetStoreByID(ctx context.Context, id string) (*domain.Store, error) {
 	var storeID pgtype.UUID

@@ -22,7 +22,7 @@ type AppHandlers struct {
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
 func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middleware) {
 	setupSystemRoutes(srv, h.Health)
-	setupAuthRoutes(srv, h.Auth, h.User)
+	setupAuthRoutes(srv, h.Auth, h.User, authMW)
 	setupStoreRoutes(srv, h.Store, h.StoreService, authMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 }
@@ -33,12 +33,16 @@ func setupSystemRoutes(srv *server.Server, health http.Handler) {
 	srv.RegisterRoutes("GET /health", health)
 }
 
-// setupAuthRoutes registers endpoints related to authentication and basic user management (public)
-func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handler.UserHandler) {
+// setupAuthRoutes registers endpoints related to authentication and basic user management (mixed)
+func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handler.UserHandler, authMW middlewares.Middleware) {
 	srv.RegisterRoutes("POST /api/v1/auth/sign_up", http.HandlerFunc(auth.SignUp))
 	srv.RegisterRoutes("POST /api/v1/auth/sign_in", http.HandlerFunc(auth.SignIn))
 	srv.RegisterRoutes("POST /api/v1/auth/sign_out", http.HandlerFunc(auth.SignOut))
 	srv.RegisterRoutes("POST /api/v1/auth/refresh", http.HandlerFunc(auth.Refresh))
+
+	// Private: reaching the handler already proves the token is valid, since authMW rejects
+	// a missing/invalid/expired token with 401 before it gets here.
+	srv.RegisterRoutes("GET /api/v1/auth/validate", middlewares.Chain(http.HandlerFunc(auth.ValidateToken), authMW))
 
 	// Consider protecting this route with authMW in the future if profiles are private.
 	srv.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(user.Get))
