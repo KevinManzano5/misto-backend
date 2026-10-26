@@ -7,9 +7,20 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/domain"
 )
 
+// defaultOpenTime and defaultCloseTime are the opening hours applied to every day of the week
+// when a store is created, until the owner customizes its schedule.
+const (
+	defaultOpenTime  = "09:00"
+	defaultCloseTime = "18:00"
+)
+
+// sunday is the domain.StoreSchedule.DayOfWeek value for Sunday, closed by default.
+const sunday = 0
+
 // StoreRepository interface
 type StoreRepository interface {
 	CreateStore(ctx context.Context, store *domain.Store) error
+	CreateStoreWithSchedules(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 	GetStoreByUserID(ctx context.Context, userID string) (*domain.Store, error)
 	UpdateStore(ctx context.Context, store *domain.Store) error
@@ -38,15 +49,30 @@ func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *Sto
 	}
 }
 
-// Create method
+// Create method creates a store along with a default weekly schedule (open every day
+// 09:00-18:00, except Sunday which is closed), which the owner can later customize.
 func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool) (*domain.Store, error) {
 	store := domain.NewStore(userID, name, description, isActive)
+	schedules := defaultWeeklySchedules()
 
-	if err := usecase.repo.CreateStore(ctx, store); err != nil {
+	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
 
 	return store, nil
+}
+
+// defaultWeeklySchedules builds the default opening-hours schedule for all seven days of the
+// week, applied to every newly created store.
+func defaultWeeklySchedules() []*domain.StoreSchedule {
+	schedules := make([]*domain.StoreSchedule, 0, 7)
+
+	for dayOfWeek := int32(0); dayOfWeek <= 6; dayOfWeek++ {
+		isClosed := dayOfWeek == sunday
+		schedules = append(schedules, domain.NewStoreSchedule("", dayOfWeek, defaultOpenTime, defaultCloseTime, isClosed))
+	}
+
+	return schedules
 }
 
 // GetByID method

@@ -121,7 +121,7 @@ func main() {
 	// Grouping of handlers
 	handlers := &router.AppHandlers{
 		Health:       handler.NewHealthHandler(),
-		User:         handler.NewUserHandler(userUC, validate, log),
+		User:         handler.NewUserHandler(userUC, storeUC, validate, log),
 		Auth:         handler.NewAuthHandler(authUC, validate, log),
 		Store:        handler.NewStoreHandler(storeUC, validate, log),
 		StoreService: handler.NewStoreServiceHandler(storeServiceUC, appointmentUC, validate, log),
