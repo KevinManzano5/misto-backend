@@ -14,6 +14,9 @@ type AppointmentRepository interface {
 	// CreateAppointment atomically checks for a scheduling conflict and inserts the appointment.
 	CreateAppointment(ctx context.Context, appointment *domain.Appointment) error
 	ListAppointmentsByStoreDate(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error)
+	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string) ([]*domain.AppointmentWithClient, error)
+	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
+	UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error)
 }
 
 // StoreScheduleRepository interface (Added for checking availability)
@@ -21,40 +24,62 @@ type StoreScheduleRepository interface {
 	GetStoreScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error)
 }
 
+// AppointmentStoreRepository interface (narrowed to what AppointmentUseCase needs from a store)
+type AppointmentStoreRepository interface {
+	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
+}
+
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
 	repo         AppointmentRepository
 	scheduleRepo StoreScheduleRepository
-	serviceRepo  StoreServiceRepository
+	storeRepo    AppointmentStoreRepository
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, serviceRepo StoreServiceRepository) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository) *AppointmentUseCase {
 	return &AppointmentUseCase{
 		repo:         repo,
 		scheduleRepo: scheduleRepo,
-		serviceRepo:  serviceRepo,
+		storeRepo:    storeRepo,
 	}
 }
 
+// storeLocation loads store's IANA timezone, used to interpret its schedule's open/close hours
+// and to resolve which calendar day/weekday an instant falls on. It falls back to UTC
+// defensively if the stored value somehow isn't loadable (StoreUseCase validates it on write).
+func storeLocation(store *domain.Store) *time.Location {
+	loc, err := time.LoadLocation(store.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+
+	return loc
+}
+
 // Create method
-func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceID, userID string, startTime time.Time) (*domain.Appointment, error) {
+func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID string, startTime time.Time) (*domain.Appointment, error) {
 	if startTime.Before(time.Now()) {
 		return nil, fmt.Errorf("%w: cannot schedule an appointment in the past", domain.ErrInvalidInput)
 	}
 
-	service, err := usecase.serviceRepo.GetStoreServiceByID(ctx, serviceID)
+	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
-		return nil, fmt.Errorf("getting store service: %w", err)
+		return nil, fmt.Errorf("getting store: %w", err)
 	}
 
-	endTime := startTime.Add(time.Duration(service.DurationMinutes) * time.Minute)
+	endTime := startTime.Add(time.Duration(store.AppointmentDuration) * time.Minute)
 
-	if err := usecase.validateWithinStoreSchedule(ctx, storeID, startTime, endTime); err != nil {
+	if err := usecase.validateWithinStoreSchedule(ctx, store, startTime, endTime); err != nil {
 		return nil, err
 	}
 
-	appointment := domain.NewAppointment(storeID, serviceID, userID, "", startTime, endTime)
+	status := domain.AppointmentStatusPending
+	if store.AutoConfirmAppointments {
+		status = domain.AppointmentStatusConfirmed
+	}
+
+	appointment := domain.NewAppointment(storeID, userID, status, startTime, endTime)
 
 	if err := usecase.repo.CreateAppointment(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("creating appointment: %w", err)
@@ -64,11 +89,14 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 }
 
 // validateWithinStoreSchedule ensures the requested [startTime, endTime) range falls entirely
-// within the store's configured opening hours for that day of the week.
-func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Context, storeID string, startTime, endTime time.Time) error {
-	dayOfWeek := int32(startTime.Weekday())
+// within the store's configured opening hours for that day of the week, with the day of week and
+// opening hours resolved in the store's own timezone rather than whatever offset the client's
+// startTime happened to carry.
+func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Context, store *domain.Store, startTime, endTime time.Time) error {
+	localStart := startTime.In(storeLocation(store))
+	dayOfWeek := int32(localStart.Weekday())
 
-	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
+	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, store.ID, dayOfWeek)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return fmt.Errorf("%w: store has no schedule configured for this day", domain.ErrInvalidInput)
@@ -80,12 +108,12 @@ func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Conte
 		return fmt.Errorf("%w: store is closed on this day", domain.ErrInvalidInput)
 	}
 
-	openTime, err := parseScheduleClockTime(startTime, schedule.OpenTime)
+	openTime, err := parseScheduleClockTime(localStart, schedule.OpenTime)
 	if err != nil {
 		return fmt.Errorf("parsing store open time: %w", err)
 	}
 
-	closeTime, err := parseScheduleClockTime(startTime, schedule.CloseTime)
+	closeTime, err := parseScheduleClockTime(localStart, schedule.CloseTime)
 	if err != nil {
 		return fmt.Errorf("parsing store close time: %w", err)
 	}
@@ -122,32 +150,51 @@ func (usecase *AppointmentUseCase) ListByStoreDate(ctx context.Context, storeID 
 	return appointments, nil
 }
 
-// GetAvailableSlots method en AppointmentUseCase
-func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeID string, durationMinutes int32, dateStr string) ([]string, error) {
-	// 1. Parse the requested date (assuming YYYY-MM-DD format)
-	targetDate, err := time.Parse("2006-01-02", dateStr)
+// daySchedule bundles what both GetAvailableSlots and GetBookedAppointments need to resolve a
+// store's opening hours and booked appointments for a specific calendar date, in the store's
+// own timezone.
+type daySchedule struct {
+	location        *time.Location
+	targetDate      time.Time
+	durationMinutes int32
+	openTime        time.Time
+	closeTime       time.Time
+	isOpen          bool
+	appointments    []*domain.Appointment
+}
+
+// resolveDaySchedule parses dateStr as a calendar date in the store's own timezone (not UTC),
+// loads the store's default appointment duration, its configured opening hours for that date's
+// day of week, and the appointments already booked that day. isOpen is false (with zero-value
+// times) when the store has no schedule for that day or is explicitly closed, which callers
+// treat as "no availability" rather than an error.
+func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, storeID, dateStr string) (*daySchedule, error) {
+	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	loc := storeLocation(store)
+
+	targetDate, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
 		return nil, domain.ErrInvalidInput
 	}
 
-	// 2. Check the schedule configured for that day of the week
 	dayOfWeek := int32(targetDate.Weekday())
 	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
-
 	if err != nil {
-		// If there is no schedule in the DB for that day, we assume it is closed (we return an empty array).
+		// If there is no schedule in the DB for that day, we assume it is closed.
 		if errors.Is(err, domain.ErrNotFound) {
-			return []string{}, nil
+			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
 		}
 		return nil, fmt.Errorf("getting store schedule: %w", err)
 	}
 
-	// If the day is explicitly marked as closed or has no hours, there is no availability.
 	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
-		return []string{}, nil
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
 	}
 
-	// 3. Convert the schedule text strings into actual date objects for that day
 	openTime, err := parseScheduleClockTime(targetDate, schedule.OpenTime)
 	if err != nil {
 		return nil, fmt.Errorf("parsing store open time: %w", err)
@@ -158,8 +205,7 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 		return nil, fmt.Errorf("parsing store close time: %w", err)
 	}
 
-	// 4. Get the appointments scheduled for that ENTIRE day
-	startOfDay := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, targetDate.Location())
+	startOfDay := targetDate
 	endOfDay := startOfDay.Add(24 * time.Hour).Add(-time.Nanosecond)
 
 	appointments, err := usecase.repo.ListAppointmentsByStoreDate(ctx, storeID, startOfDay, endOfDay)
@@ -167,26 +213,41 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 		return nil, fmt.Errorf("listing appointments for availability: %w", err)
 	}
 
-	var availableSlots []string
-	slotDuration := time.Duration(durationMinutes) * time.Minute
-	currentSlot := openTime
-	now := time.Now()
+	return &daySchedule{
+		location:        loc,
+		targetDate:      targetDate,
+		durationMinutes: store.AppointmentDuration,
+		openTime:        openTime,
+		closeTime:       closeTime,
+		isOpen:          true,
+		appointments:    appointments,
+	}, nil
+}
 
-	// 5. Generate intervals and filter out those that overlap or have already passed
-	for currentSlot.Add(slotDuration).Compare(closeTime) <= 0 {
+// availableSlots computes the free start times for day, in "HH:MM" format (the store's local
+// time), skipping slots that overlap an existing appointment or that have already passed (when
+// day is today in the store's timezone).
+func (day *daySchedule) availableSlots() []string {
+	availableSlots := make([]string, 0)
+	if !day.isOpen {
+		return availableSlots
+	}
+
+	slotDuration := time.Duration(day.durationMinutes) * time.Minute
+	currentSlot := day.openTime
+	now := time.Now().In(day.location)
+
+	for currentSlot.Add(slotDuration).Compare(day.closeTime) <= 0 {
 		slotEnd := currentSlot.Add(slotDuration)
 		isAvailable := true
 
-		// If the selected schedule is for today, omit the hours that have already passed.
-		if targetDate.YearDay() == now.YearDay() && targetDate.Year() == now.Year() {
-			if currentSlot.Before(now) {
-				isAvailable = false
-			}
+		// If the selected schedule is for today (in the store's timezone), omit hours already passed.
+		if day.targetDate.YearDay() == now.YearDay() && day.targetDate.Year() == now.Year() && currentSlot.Before(now) {
+			isAvailable = false
 		}
 
 		if isAvailable {
-			// Iterate over the appointments from the database
-			for _, appointment := range appointments {
+			for _, appointment := range day.appointments {
 				// A conflict occurs if the time slot begins before the appointment ends, and ends after the appointment begins.
 				if currentSlot.Before(appointment.EndTime) && slotEnd.After(appointment.StartTime) {
 					isAvailable = false
@@ -196,18 +257,77 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 		}
 
 		if isAvailable {
-			availableSlots = append(availableSlots, currentSlot.Format("15:04")) // HH:MM format
+			availableSlots = append(availableSlots, currentSlot.Format("15:04"))
 		}
 
-		// Advance to the next available time slot
-		// (You can change this to advance in 30-minute increments instead of skipping the entire duration of the service)
 		currentSlot = currentSlot.Add(slotDuration)
 	}
 
-	// Avoid returning null in the JSON if there are no time slots.
-	if availableSlots == nil {
-		availableSlots = make([]string, 0)
+	return availableSlots
+}
+
+// GetAvailableSlots method en AppointmentUseCase
+func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeID, dateStr string) ([]string, error) {
+	day, err := usecase.resolveDaySchedule(ctx, storeID, dateStr)
+	if err != nil {
+		return nil, err
 	}
 
-	return availableSlots, nil
+	return day.availableSlots(), nil
+}
+
+// GetBookedAppointments returns every appointment ever booked at storeID, any status, each
+// paired with the basic profile of the client who booked it. Only the store's owner
+// (requesterUserID) may see this: anyone else gets domain.ErrForbidden.
+func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, storeID, requesterUserID string) ([]*domain.AppointmentWithClient, error) {
+	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if store.UserID != requesterUserID {
+		return nil, fmt.Errorf("%w: only the store owner can view its booked appointments", domain.ErrForbidden)
+	}
+
+	appointments, err := usecase.repo.ListAllAppointmentsByStoreWithClient(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing booked appointments: %w", err)
+	}
+
+	return appointments, nil
+}
+
+// UpdateStatus moves a pending appointment to confirmed (approved) or cancelled (rejected).
+// Only the store's owner (requesterUserID) may do this, and only while the appointment is still
+// pending: anyone else gets domain.ErrForbidden, and any other starting status is rejected with
+// domain.ErrInvalidInput since it's no longer awaiting a decision.
+func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus string) (*domain.Appointment, error) {
+	if newStatus != domain.AppointmentStatusConfirmed && newStatus != domain.AppointmentStatusCancelled {
+		return nil, fmt.Errorf("%w: status must be %q or %q", domain.ErrInvalidInput, domain.AppointmentStatusConfirmed, domain.AppointmentStatusCancelled)
+	}
+
+	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("getting appointment: %w", err)
+	}
+
+	store, err := usecase.storeRepo.GetStoreByID(ctx, appointment.StoreID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if store.UserID != requesterUserID {
+		return nil, fmt.Errorf("%w: only the store owner can review this appointment", domain.ErrForbidden)
+	}
+
+	if appointment.Status != domain.AppointmentStatusPending {
+		return nil, fmt.Errorf("%w: appointment is not pending approval", domain.ErrInvalidInput)
+	}
+
+	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus)
+	if err != nil {
+		return nil, fmt.Errorf("updating appointment status: %w", err)
+	}
+
+	return updated, nil
 }

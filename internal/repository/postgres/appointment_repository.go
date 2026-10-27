@@ -21,17 +21,19 @@ type AppointmentRepository struct {
 }
 
 // toDomainAppointment function
+//
+// Timestamps are normalized to UTC here, the single point where appointments cross from
+// Postgres into the domain, so every layer above works with a consistent timezone.
 func toDomainAppointment(appointment postgres.Appointment) *domain.Appointment {
 	return &domain.Appointment{
 		ID:        appointment.ID.String(),
 		StoreID:   appointment.StoreID.String(),
-		ServiceID: appointment.ServiceID.String(),
 		UserID:    appointment.ClientID.String(),
-		StartTime: appointment.StartTime.Time,
-		EndTime:   appointment.EndTime.Time,
+		StartTime: appointment.StartTime.Time.UTC(),
+		EndTime:   appointment.EndTime.Time.UTC(),
 		Status:    appointment.Status,
-		CreatedAt: appointment.CreatedAt.Time,
-		UpdatedAt: appointment.UpdatedAt.Time,
+		CreatedAt: appointment.CreatedAt.Time.UTC(),
+		UpdatedAt: appointment.UpdatedAt.Time.UTC(),
 	}
 }
 
@@ -43,17 +45,15 @@ func NewAppointmentRepository(pool *pgxpool.Pool) *AppointmentRepository {
 	}
 }
 
-// CreateAppointment method atomically checks the requested time slot for a conflict and
-// inserts the appointment within a single transaction, so a concurrent request for the same
-// slot can never slip past the overlap check before either insert commits.
+// CreateAppointment method atomically checks that the client has no other pending/confirmed
+// appointment at this store and that the requested time slot has no conflict, then inserts the
+// appointment, all within a single transaction, so a concurrent request can never slip past
+// either check before either insert commits.
 func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appointment *domain.Appointment) error {
-	var storeID, serviceID, clientID pgtype.UUID
+	var storeID, clientID pgtype.UUID
 
 	if err := storeID.Scan(appointment.StoreID); err != nil {
 		return fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
-	}
-	if err := serviceID.Scan(appointment.ServiceID); err != nil {
-		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
 	}
 	if err := clientID.Scan(appointment.UserID); err != nil {
 		return fmt.Errorf("invalid userID: %w", domain.ErrInvalidInput)
@@ -73,6 +73,17 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	txQueries := repo.queries.WithTx(tx)
 
+	activeCount, err := txQueries.CheckClientHasActiveAppointment(ctx, postgres.CheckClientHasActiveAppointmentParams{
+		StoreID:  storeID,
+		ClientID: clientID,
+	})
+	if err != nil {
+		return fmt.Errorf("checking client active appointment: %w", err)
+	}
+	if activeCount > 0 {
+		return fmt.Errorf("%w: client already has a pending or confirmed appointment at this store", domain.ErrAlreadyExists)
+	}
+
 	count, err := txQueries.CheckAppointmentOverlap(ctx, postgres.CheckAppointmentOverlapParams{
 		StoreID:      storeID,
 		NewStartTime: start,
@@ -87,10 +98,10 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	result, err := txQueries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
 		StoreID:   storeID,
-		ServiceID: serviceID,
 		ClientID:  clientID,
 		StartTime: start,
 		EndTime:   end,
+		Status:    appointment.Status,
 	})
 	if err != nil {
 		return translateAppointmentWriteError(err)
@@ -102,8 +113,10 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	appointment.ID = result.ID.String()
 	appointment.Status = result.Status
-	appointment.CreatedAt = result.CreatedAt.Time
-	appointment.UpdatedAt = result.UpdatedAt.Time
+	appointment.StartTime = result.StartTime.Time.UTC()
+	appointment.EndTime = result.EndTime.Time.UTC()
+	appointment.CreatedAt = result.CreatedAt.Time.UTC()
+	appointment.UpdatedAt = result.UpdatedAt.Time.UTC()
 
 	return nil
 }
@@ -114,8 +127,8 @@ func translateAppointmentWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "23503": // foreign_key_violation: store_id, service_id or client_id does not reference an existing row
-			return fmt.Errorf("%w: referenced store, service or client does not exist", domain.ErrInvalidInput)
+		case "23503": // foreign_key_violation: store_id or client_id does not reference an existing row
+			return fmt.Errorf("%w: referenced store or client does not exist", domain.ErrInvalidInput)
 		case "23505": // unique_violation
 			return fmt.Errorf("%w", domain.ErrAlreadyExists)
 		}
@@ -154,4 +167,82 @@ func (repo *AppointmentRepository) ListAppointmentsByStoreDate(ctx context.Conte
 	}
 
 	return appointments, nil
+}
+
+// ListAllAppointmentsByStoreWithClient method returns every appointment ever booked at storeID,
+// any status, most recent first, each paired with the basic profile of the client who booked it.
+func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string) ([]*domain.AppointmentWithClient, error) {
+	var sID pgtype.UUID
+
+	if err := sID.Scan(storeID); err != nil {
+		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+
+	results, err := repo.queries.ListAllAppointmentsByStoreWithClient(ctx, sID)
+	if err != nil {
+		return nil, fmt.Errorf("listing all appointments: %w", err)
+	}
+
+	appointments := make([]*domain.AppointmentWithClient, 0, len(results))
+	for _, result := range results {
+		appointments = append(appointments, &domain.AppointmentWithClient{
+			Appointment: domain.Appointment{
+				ID:        result.ID.String(),
+				StoreID:   result.StoreID.String(),
+				UserID:    result.ClientID.String(),
+				StartTime: result.StartTime.Time.UTC(),
+				EndTime:   result.EndTime.Time.UTC(),
+				Status:    result.Status,
+				CreatedAt: result.CreatedAt.Time.UTC(),
+				UpdatedAt: result.UpdatedAt.Time.UTC(),
+			},
+			ClientUsername:  result.ClientUsername,
+			ClientEmail:     result.ClientEmail,
+			ClientFirstName: result.ClientFirstName,
+			ClientLastName:  result.ClientLastName,
+		})
+	}
+
+	return appointments, nil
+}
+
+// GetAppointmentByID method
+func (repo *AppointmentRepository) GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error) {
+	var appointmentID pgtype.UUID
+
+	if err := appointmentID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid appointmentID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("appointment with id %s: %w", id, domain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("getting appointment %s: %w", id, err)
+	}
+
+	return toDomainAppointment(result), nil
+}
+
+// UpdateAppointmentStatus method
+func (repo *AppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error) {
+	var appointmentID pgtype.UUID
+
+	if err := appointmentID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid appointmentID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.UpdateAppointmentStatus(ctx, postgres.UpdateAppointmentStatusParams{
+		ID:     appointmentID,
+		Status: status,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("appointment with id %s: %w", id, domain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("updating appointment %s: %w", id, err)
+	}
+
+	return toDomainAppointment(result), nil
 }

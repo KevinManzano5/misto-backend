@@ -66,8 +66,8 @@ func toDomainStoreSchedule(schedule postgres.StoreSchedule) *domain.StoreSchedul
 		OpenTime:  fromPgTime(schedule.OpenTime),
 		CloseTime: fromPgTime(schedule.CloseTime),
 		IsClosed:  schedule.IsClosed,
-		CreatedAt: schedule.CreatedAt.Time,
-		UpdatedAt: schedule.UpdatedAt.Time,
+		CreatedAt: schedule.CreatedAt.Time.UTC(),
+		UpdatedAt: schedule.UpdatedAt.Time.UTC(),
 	}
 }
 
@@ -92,8 +92,8 @@ func (repo *StoreScheduleRepository) UpsertStoreSchedule(ctx context.Context, sc
 	}
 
 	schedule.ID = result.ID.String()
-	schedule.CreatedAt = result.CreatedAt.Time
-	schedule.UpdatedAt = result.UpdatedAt.Time
+	schedule.CreatedAt = result.CreatedAt.Time.UTC()
+	schedule.UpdatedAt = result.UpdatedAt.Time.UTC()
 	schedule.OpenTime = fromPgTime(result.OpenTime)
 	schedule.CloseTime = fromPgTime(result.CloseTime)
 

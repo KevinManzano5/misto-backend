@@ -33,43 +33,61 @@ func (q *Queries) CheckAppointmentOverlap(ctx context.Context, arg CheckAppointm
 	return count, err
 }
 
-const createAppointment = `-- name: CreateAppointment :one
+const checkClientHasActiveAppointment = `-- name: CheckClientHasActiveAppointment :one
 
+SELECT COUNT(*) FROM appointments
+WHERE store_id = $1
+  AND client_id = $2
+  AND status IN ('pending', 'confirmed')
+`
+
+type CheckClientHasActiveAppointmentParams struct {
+	StoreID  pgtype.UUID `json:"store_id"`
+	ClientID pgtype.UUID `json:"client_id"`
+}
+
+// The existing appointment ends after the new one begins.
+// Check whether the client already has a pending or confirmed appointment at this store.
+func (q *Queries) CheckClientHasActiveAppointment(ctx context.Context, arg CheckClientHasActiveAppointmentParams) (int64, error) {
+	row := q.db.QueryRow(ctx, checkClientHasActiveAppointment, arg.StoreID, arg.ClientID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createAppointment = `-- name: CreateAppointment :one
 INSERT INTO appointments (
     store_id,
-    service_id,
     client_id,
     start_time,
     end_time,
     status
 ) VALUES (
-    $1, $2, $3, $4, $5, 'confirmed'
+    $1, $2, $3, $4, $5
 )
-RETURNING id, store_id, service_id, client_id, start_time, end_time, status, created_at, updated_at
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at
 `
 
 type CreateAppointmentParams struct {
 	StoreID   pgtype.UUID        `json:"store_id"`
-	ServiceID pgtype.UUID        `json:"service_id"`
 	ClientID  pgtype.UUID        `json:"client_id"`
 	StartTime pgtype.Timestamptz `json:"start_time"`
 	EndTime   pgtype.Timestamptz `json:"end_time"`
+	Status    string             `json:"status"`
 }
 
-// The existing appointment ends after the new one begins.
 func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error) {
 	row := q.db.QueryRow(ctx, createAppointment,
 		arg.StoreID,
-		arg.ServiceID,
 		arg.ClientID,
 		arg.StartTime,
 		arg.EndTime,
+		arg.Status,
 	)
 	var i Appointment
 	err := row.Scan(
 		&i.ID,
 		&i.StoreID,
-		&i.ServiceID,
 		&i.ClientID,
 		&i.StartTime,
 		&i.EndTime,
@@ -80,52 +98,100 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 	return i, err
 }
 
-const createService = `-- name: CreateService :one
-INSERT INTO store_services (
-    store_id,
-    name,
-    description,
-    duration_minutes,
-    price
-) VALUES (
-    $1, $2, $3, $4, $5
-)
-RETURNING id, store_id, name, description, duration_minutes, price, is_active, created_at, updated_at
+const getAppointmentByID = `-- name: GetAppointmentByID :one
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at FROM appointments
+WHERE id = $1
+LIMIT 1
 `
 
-type CreateServiceParams struct {
-	StoreID         pgtype.UUID    `json:"store_id"`
-	Name            string         `json:"name"`
-	Description     *string        `json:"description"`
-	DurationMinutes int32          `json:"duration_minutes"`
-	Price           pgtype.Numeric `json:"price"`
-}
-
-func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (StoreService, error) {
-	row := q.db.QueryRow(ctx, createService,
-		arg.StoreID,
-		arg.Name,
-		arg.Description,
-		arg.DurationMinutes,
-		arg.Price,
-	)
-	var i StoreService
+func (q *Queries) GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appointment, error) {
+	row := q.db.QueryRow(ctx, getAppointmentByID, id)
+	var i Appointment
 	err := row.Scan(
 		&i.ID,
 		&i.StoreID,
-		&i.Name,
-		&i.Description,
-		&i.DurationMinutes,
-		&i.Price,
-		&i.IsActive,
+		&i.ClientID,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const listAllAppointmentsByStoreWithClient = `-- name: ListAllAppointmentsByStoreWithClient :many
+SELECT
+    a.id,
+    a.store_id,
+    a.client_id,
+    a.start_time,
+    a.end_time,
+    a.status,
+    a.created_at,
+    a.updated_at,
+    u.username AS client_username,
+    u.email AS client_email,
+    u.first_name AS client_first_name,
+    u.last_name AS client_last_name
+FROM appointments a
+JOIN users u ON u.id = a.client_id
+WHERE a.store_id = $1
+ORDER BY a.start_time DESC
+`
+
+type ListAllAppointmentsByStoreWithClientRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	StoreID         pgtype.UUID        `json:"store_id"`
+	ClientID        pgtype.UUID        `json:"client_id"`
+	StartTime       pgtype.Timestamptz `json:"start_time"`
+	EndTime         pgtype.Timestamptz `json:"end_time"`
+	Status          string             `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ClientUsername  string             `json:"client_username"`
+	ClientEmail     string             `json:"client_email"`
+	ClientFirstName string             `json:"client_first_name"`
+	ClientLastName  string             `json:"client_last_name"`
+}
+
+// Every appointment ever booked at a store, any status, along with the client's basic profile,
+// for the owner's full history view.
+func (q *Queries) ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID pgtype.UUID) ([]ListAllAppointmentsByStoreWithClientRow, error) {
+	rows, err := q.db.Query(ctx, listAllAppointmentsByStoreWithClient, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllAppointmentsByStoreWithClientRow{}
+	for rows.Next() {
+		var i ListAllAppointmentsByStoreWithClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StoreID,
+			&i.ClientID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ClientUsername,
+			&i.ClientEmail,
+			&i.ClientFirstName,
+			&i.ClientLastName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAppointmentsByStoreDate = `-- name: ListAppointmentsByStoreDate :many
-SELECT id, store_id, service_id, client_id, start_time, end_time, status, created_at, updated_at FROM appointments
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at FROM appointments
 WHERE store_id = $1
   AND start_time >= $2
   AND start_time <= $3
@@ -152,7 +218,6 @@ func (q *Queries) ListAppointmentsByStoreDate(ctx context.Context, arg ListAppoi
 		if err := rows.Scan(
 			&i.ID,
 			&i.StoreID,
-			&i.ServiceID,
 			&i.ClientID,
 			&i.StartTime,
 			&i.EndTime,
@@ -170,39 +235,32 @@ func (q *Queries) ListAppointmentsByStoreDate(ctx context.Context, arg ListAppoi
 	return items, nil
 }
 
-const listStoreServices = `-- name: ListStoreServices :many
-SELECT id, store_id, name, description, duration_minutes, price, is_active, created_at, updated_at FROM store_services
-WHERE store_id = $1 
-  AND is_active = TRUE
-ORDER BY name ASC
+const updateAppointmentStatus = `-- name: UpdateAppointmentStatus :one
+UPDATE appointments
+SET
+    status = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at
 `
 
-func (q *Queries) ListStoreServices(ctx context.Context, storeID pgtype.UUID) ([]StoreService, error) {
-	rows, err := q.db.Query(ctx, listStoreServices, storeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []StoreService{}
-	for rows.Next() {
-		var i StoreService
-		if err := rows.Scan(
-			&i.ID,
-			&i.StoreID,
-			&i.Name,
-			&i.Description,
-			&i.DurationMinutes,
-			&i.Price,
-			&i.IsActive,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+type UpdateAppointmentStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+func (q *Queries) UpdateAppointmentStatus(ctx context.Context, arg UpdateAppointmentStatusParams) (Appointment, error) {
+	row := q.db.QueryRow(ctx, updateAppointmentStatus, arg.ID, arg.Status)
+	var i Appointment
+	err := row.Scan(
+		&i.ID,
+		&i.StoreID,
+		&i.ClientID,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

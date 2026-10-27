@@ -11,7 +11,6 @@ import (
 type Appointment struct {
 	ID        pgtype.UUID        `json:"id"`
 	StoreID   pgtype.UUID        `json:"store_id"`
-	ServiceID pgtype.UUID        `json:"service_id"`
 	ClientID  pgtype.UUID        `json:"client_id"`
 	StartTime pgtype.Timestamptz `json:"start_time"`
 	EndTime   pgtype.Timestamptz `json:"end_time"`
@@ -21,14 +20,17 @@ type Appointment struct {
 }
 
 type Store struct {
-	ID          pgtype.UUID        `json:"id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Name        string             `json:"name"`
-	Description *string            `json:"description"`
-	IsActive    bool               `json:"is_active"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	ID                      pgtype.UUID        `json:"id"`
+	UserID                  pgtype.UUID        `json:"user_id"`
+	Name                    string             `json:"name"`
+	Description             *string            `json:"description"`
+	IsActive                bool               `json:"is_active"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt               pgtype.Timestamptz `json:"deleted_at"`
+	AppointmentDuration     int32              `json:"appointment_duration"`
+	Timezone                string             `json:"timezone"`
+	AutoConfirmAppointments bool               `json:"auto_confirm_appointments"`
 }
 
 type StoreSchedule struct {
@@ -40,18 +42,6 @@ type StoreSchedule struct {
 	IsClosed  bool               `json:"is_closed"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type StoreService struct {
-	ID              pgtype.UUID        `json:"id"`
-	StoreID         pgtype.UUID        `json:"store_id"`
-	Name            string             `json:"name"`
-	Description     *string            `json:"description"`
-	DurationMinutes int32              `json:"duration_minutes"`
-	Price           pgtype.Numeric     `json:"price"`
-	IsActive        bool               `json:"is_active"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {
