@@ -68,6 +68,10 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID s
 		return nil, fmt.Errorf("getting store: %w", err)
 	}
 
+	if !store.AllowSameDayAppointments && isSameLocalDay(startTime, time.Now(), storeLocation(store)) {
+		return nil, fmt.Errorf("%w: this store does not accept same-day appointments", domain.ErrInvalidInput)
+	}
+
 	endTime := startTime.Add(time.Duration(store.AppointmentDuration) * time.Minute)
 
 	if err := usecase.validateWithinStoreSchedule(ctx, store, startTime, endTime); err != nil {
@@ -125,6 +129,12 @@ func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Conte
 	return nil
 }
 
+// isSameLocalDay reports whether a and b fall on the same calendar day in loc.
+func isSameLocalDay(a, b time.Time, loc *time.Location) bool {
+	a, b = a.In(loc), b.In(loc)
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
+}
+
 // parseScheduleClockTime combines a "HH:MM" or "HH:MM:SS" clock string (as stored on a
 // StoreSchedule) with the date portion of date, in date's location.
 func parseScheduleClockTime(date time.Time, clock string) (time.Time, error) {
@@ -179,6 +189,17 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	targetDate, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
 		return nil, domain.ErrInvalidInput
+	}
+
+	now := time.Now()
+	today := now.In(loc)
+	todayDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
+	if targetDate.Before(todayDate) {
+		return nil, fmt.Errorf("%w: cannot get availability for a past date", domain.ErrInvalidInput)
+	}
+
+	if !store.AllowSameDayAppointments && isSameLocalDay(targetDate, now, loc) {
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
 	}
 
 	dayOfWeek := int32(targetDate.Weekday())

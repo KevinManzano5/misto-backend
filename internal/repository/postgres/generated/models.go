@@ -20,17 +20,20 @@ type Appointment struct {
 }
 
 type Store struct {
-	ID                      pgtype.UUID        `json:"id"`
-	UserID                  pgtype.UUID        `json:"user_id"`
-	Name                    string             `json:"name"`
-	Description             *string            `json:"description"`
-	IsActive                bool               `json:"is_active"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `json:"deleted_at"`
-	AppointmentDuration     int32              `json:"appointment_duration"`
-	Timezone                string             `json:"timezone"`
-	AutoConfirmAppointments bool               `json:"auto_confirm_appointments"`
+	ID                       pgtype.UUID        `json:"id"`
+	UserID                   pgtype.UUID        `json:"user_id"`
+	Name                     string             `json:"name"`
+	Description              *string            `json:"description"`
+	IsActive                 bool               `json:"is_active"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	AppointmentDuration      int32              `json:"appointment_duration"`
+	Timezone                 string             `json:"timezone"`
+	AutoConfirmAppointments  bool               `json:"auto_confirm_appointments"`
+	Email                    *string            `json:"email"`
+	Address                  *string            `json:"address"`
+	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
 }
 
 type StoreSchedule struct {

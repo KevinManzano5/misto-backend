@@ -5,9 +5,12 @@ INSERT INTO stores (
     description,
     appointment_duration,
     timezone,
-    auto_confirm_appointments
+    auto_confirm_appointments,
+    email,
+    address,
+    allow_same_day_appointments
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 RETURNING *;
 
@@ -38,6 +41,9 @@ SET
     appointment_duration = COALESCE($5, appointment_duration),
     timezone = COALESCE($6, timezone),
     auto_confirm_appointments = COALESCE($7, auto_confirm_appointments),
+    email = COALESCE($8, email),
+    address = COALESCE($9, address),
+    allow_same_day_appointments = COALESCE($10, allow_same_day_appointments),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL
