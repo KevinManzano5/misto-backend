@@ -172,34 +172,30 @@ func (handler *AppointmentHandler) GetAvailableSlots(writer http.ResponseWriter,
 
 // bookedAppointmentResponse struct
 type bookedAppointmentResponse struct {
-	ID        string    `json:"id"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Status    string    `json:"status"`
+	ID              string    `json:"id"`
+	StartTime       time.Time `json:"start_time"`
+	EndTime         time.Time `json:"end_time"`
+	Status          string    `json:"status"`
+	ClientUsername  string    `json:"client_username"`
+	ClientEmail     string    `json:"client_email"`
+	ClientFirstName string    `json:"client_first_name"`
+	ClientLastName  string    `json:"client_last_name"`
 }
 
 // GetBookedAppointments endpoint (e.g., GET /stores/{storeId}/appointments)
 //
 // @Summary Get a store's booked appointments
-// @Description Lists the appointments already reserved at a store on a given date. Only the store's owner may call this.
+// @Description Lists every appointment ever booked at a store, any status, with the booking client's basic profile. Only the store's owner may call this.
 // @Tags appointments
 // @Produce json
 // @Param storeId path string true "Store ID"
-// @Param date query string true "Date (YYYY-MM-DD)"
 // @Success 200 {array} bookedAppointmentResponse
-// @Failure 400 {object} ProblemDetails
 // @Failure 403 {object} ProblemDetails
 // @Router /stores/{storeId}/appointments [get]
 func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWriter, request *http.Request) {
 	storeID := request.PathValue("storeId")
-	dateStr := request.URL.Query().Get("date")
 
-	if dateStr == "" {
-		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
-		return
-	}
-
-	appointments, err := handler.usecase.GetBookedAppointments(request.Context(), storeID, middlewares.GetUserID(request), dateStr)
+	appointments, err := handler.usecase.GetBookedAppointments(request.Context(), storeID, middlewares.GetUserID(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -208,14 +204,97 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 	response := make([]bookedAppointmentResponse, 0, len(appointments))
 	for _, appointment := range appointments {
 		response = append(response, bookedAppointmentResponse{
-			ID:        appointment.ID,
-			StartTime: appointment.StartTime,
-			EndTime:   appointment.EndTime,
-			Status:    appointment.Status,
+			ID:              appointment.ID,
+			StartTime:       appointment.StartTime,
+			EndTime:         appointment.EndTime,
+			Status:          appointment.Status,
+			ClientUsername:  appointment.ClientUsername,
+			ClientEmail:     appointment.ClientEmail,
+			ClientFirstName: appointment.ClientFirstName,
+			ClientLastName:  appointment.ClientLastName,
 		})
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// updateAppointmentStatusRequest struct
+type updateAppointmentStatusRequest struct {
+	Status string `json:"status" validate:"required,oneof=confirmed cancelled"`
+}
+
+// UpdateStatus endpoint (e.g., PATCH /appointments/{id}/status)
+//
+// @Summary Approve or reject a pending appointment
+// @Description Moves a pending appointment to confirmed (approve) or cancelled (reject). Only the store's owner may call this.
+// @Tags appointments
+// @Accept json
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Param request body updateAppointmentStatusRequest true "New status"
+// @Success 200 {object} appointmentResponse
+// @Failure 400 {object} ProblemDetails
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/status [patch]
+func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req updateAppointmentStatusRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrs := handler.validator.Validate(req); validationErrs != nil {
+		err := &ValidationErrorContext{
+			Err:     domain.ErrInvalidInput,
+			Details: validationErrs,
+		}
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	appointment, err := handler.usecase.UpdateStatus(request.Context(), id, middlewares.GetUserID(request), req.Status)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
+		ID:        appointment.ID,
+		StoreID:   appointment.StoreID,
+		UserID:    appointment.UserID,
+		StartTime: appointment.StartTime,
+		EndTime:   appointment.EndTime,
+		Status:    appointment.Status,
+	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",

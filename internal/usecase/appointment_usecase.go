@@ -14,6 +14,9 @@ type AppointmentRepository interface {
 	// CreateAppointment atomically checks for a scheduling conflict and inserts the appointment.
 	CreateAppointment(ctx context.Context, appointment *domain.Appointment) error
 	ListAppointmentsByStoreDate(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error)
+	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string) ([]*domain.AppointmentWithClient, error)
+	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
+	UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error)
 }
 
 // StoreScheduleRepository interface (Added for checking availability)
@@ -71,7 +74,12 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID s
 		return nil, err
 	}
 
-	appointment := domain.NewAppointment(storeID, userID, "", startTime, endTime)
+	status := domain.AppointmentStatusPending
+	if store.AutoConfirmAppointments {
+		status = domain.AppointmentStatusConfirmed
+	}
+
+	appointment := domain.NewAppointment(storeID, userID, status, startTime, endTime)
 
 	if err := usecase.repo.CreateAppointment(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("creating appointment: %w", err)
@@ -268,10 +276,10 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 	return day.availableSlots(), nil
 }
 
-// GetBookedAppointments returns the appointments already reserved at storeID on dateStr (a
-// calendar date interpreted in the store's own timezone). Only the store's owner
+// GetBookedAppointments returns every appointment ever booked at storeID, any status, each
+// paired with the basic profile of the client who booked it. Only the store's owner
 // (requesterUserID) may see this: anyone else gets domain.ErrForbidden.
-func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, storeID, requesterUserID, dateStr string) ([]*domain.Appointment, error) {
+func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, storeID, requesterUserID string) ([]*domain.AppointmentWithClient, error) {
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
@@ -281,22 +289,45 @@ func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, st
 		return nil, fmt.Errorf("%w: only the store owner can view its booked appointments", domain.ErrForbidden)
 	}
 
-	targetDate, err := time.ParseInLocation("2006-01-02", dateStr, storeLocation(store))
+	appointments, err := usecase.repo.ListAllAppointmentsByStoreWithClient(ctx, storeID)
 	if err != nil {
-		return nil, domain.ErrInvalidInput
-	}
-
-	startOfDay := targetDate
-	endOfDay := startOfDay.Add(24 * time.Hour).Add(-time.Nanosecond)
-
-	appointments, err := usecase.ListByStoreDate(ctx, storeID, startOfDay, endOfDay)
-	if err != nil {
-		return nil, err
-	}
-
-	if appointments == nil {
-		appointments = make([]*domain.Appointment, 0)
+		return nil, fmt.Errorf("listing booked appointments: %w", err)
 	}
 
 	return appointments, nil
+}
+
+// UpdateStatus moves a pending appointment to confirmed (approved) or cancelled (rejected).
+// Only the store's owner (requesterUserID) may do this, and only while the appointment is still
+// pending: anyone else gets domain.ErrForbidden, and any other starting status is rejected with
+// domain.ErrInvalidInput since it's no longer awaiting a decision.
+func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus string) (*domain.Appointment, error) {
+	if newStatus != domain.AppointmentStatusConfirmed && newStatus != domain.AppointmentStatusCancelled {
+		return nil, fmt.Errorf("%w: status must be %q or %q", domain.ErrInvalidInput, domain.AppointmentStatusConfirmed, domain.AppointmentStatusCancelled)
+	}
+
+	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("getting appointment: %w", err)
+	}
+
+	store, err := usecase.storeRepo.GetStoreByID(ctx, appointment.StoreID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if store.UserID != requesterUserID {
+		return nil, fmt.Errorf("%w: only the store owner can review this appointment", domain.ErrForbidden)
+	}
+
+	if appointment.Status != domain.AppointmentStatusPending {
+		return nil, fmt.Errorf("%w: appointment is not pending approval", domain.ErrInvalidInput)
+	}
+
+	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus)
+	if err != nil {
+		return nil, fmt.Errorf("updating appointment status: %w", err)
+	}
+
+	return updated, nil
 }

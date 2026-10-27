@@ -66,7 +66,7 @@ func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *Sto
 
 // Create method creates a store along with a default weekly schedule (open every day
 // 09:00-18:00, except Sunday which is closed), which the owner can later customize.
-func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string) (*domain.Store, error) {
+func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool) (*domain.Store, error) {
 	if appointmentDuration <= 0 {
 		appointmentDuration = defaultAppointmentDuration
 	}
@@ -77,7 +77,7 @@ func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, descripti
 		return nil, err
 	}
 
-	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone)
+	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone, autoConfirmAppointments)
 	schedules := defaultWeeklySchedules()
 
 	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
@@ -134,7 +134,7 @@ func (usecase *StoreUseCase) List(ctx context.Context) ([]*domain.Store, error) 
 }
 
 // Update method applies the supplied changes to a store and returns the persisted store.
-func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string) (*domain.Store, error) {
+func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string, autoConfirmAppointments *bool) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store to update: %w", err)
@@ -157,6 +157,9 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 			return nil, err
 		}
 		store.Timezone = *timezone
+	}
+	if autoConfirmAppointments != nil {
+		store.AutoConfirmAppointments = *autoConfirmAppointments
 	}
 
 	if !store.IsValid() {

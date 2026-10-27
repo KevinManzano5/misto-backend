@@ -39,27 +39,32 @@ type createStoreRequest struct {
 	AppointmentDuration int32  `json:"appointment_duration" validate:"omitempty,min=1"`
 	// Timezone is the store's IANA timezone (e.g. "America/Bogota"). Defaults to "UTC" when omitted.
 	Timezone string `json:"timezone" validate:"omitempty"`
+	// AutoConfirmAppointments controls whether new appointments are confirmed immediately or
+	// left pending for the owner to approve/reject. Defaults to true (auto-confirm) when omitted.
+	AutoConfirmAppointments *bool `json:"auto_confirm_appointments"`
 }
 
 type updateStoreRequest struct {
-	Name                *string `json:"name" validate:"omitempty,min=2,max=30"`
-	Description         *string `json:"description"`
-	IsActive            *bool   `json:"is_active"`
-	AppointmentDuration *int32  `json:"appointment_duration" validate:"omitempty,min=1"`
-	Timezone            *string `json:"timezone" validate:"omitempty"`
+	Name                    *string `json:"name" validate:"omitempty,min=2,max=30"`
+	Description             *string `json:"description"`
+	IsActive                *bool   `json:"is_active"`
+	AppointmentDuration     *int32  `json:"appointment_duration" validate:"omitempty,min=1"`
+	Timezone                *string `json:"timezone" validate:"omitempty"`
+	AutoConfirmAppointments *bool   `json:"auto_confirm_appointments"`
 }
 
 type storeResponse struct {
-	ID                  string                  `json:"id"`
-	UserID              string                  `json:"user_id"`
-	Name                string                  `json:"name"`
-	Description         string                  `json:"description"`
-	IsActive            bool                    `json:"is_active"`
-	AppointmentDuration int32                   `json:"appointment_duration"`
-	Timezone            string                  `json:"timezone"`
-	Schedules           []storeScheduleResponse `json:"schedules"`
-	CreatedAt           time.Time               `json:"created_at"`
-	UpdatedAt           time.Time               `json:"updated_at"`
+	ID                      string                  `json:"id"`
+	UserID                  string                  `json:"user_id"`
+	Name                    string                  `json:"name"`
+	Description             string                  `json:"description"`
+	IsActive                bool                    `json:"is_active"`
+	AppointmentDuration     int32                   `json:"appointment_duration"`
+	Timezone                string                  `json:"timezone"`
+	AutoConfirmAppointments bool                    `json:"auto_confirm_appointments"`
+	Schedules               []storeScheduleResponse `json:"schedules"`
+	CreatedAt               time.Time               `json:"created_at"`
+	UpdatedAt               time.Time               `json:"updated_at"`
 }
 
 type upsertStoreScheduleRequest struct {
@@ -116,16 +121,17 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 	}
 
 	return storeResponse{
-		ID:                  store.ID,
-		UserID:              store.UserID,
-		Name:                store.Name,
-		Description:         store.Description,
-		IsActive:            store.IsActive,
-		AppointmentDuration: store.AppointmentDuration,
-		Timezone:            store.Timezone,
-		Schedules:           scheduleResponses,
-		CreatedAt:           store.CreatedAt,
-		UpdatedAt:           store.UpdatedAt,
+		ID:                      store.ID,
+		UserID:                  store.UserID,
+		Name:                    store.Name,
+		Description:             store.Description,
+		IsActive:                store.IsActive,
+		AppointmentDuration:     store.AppointmentDuration,
+		Timezone:                store.Timezone,
+		AutoConfirmAppointments: store.AutoConfirmAppointments,
+		Schedules:               scheduleResponses,
+		CreatedAt:               store.CreatedAt,
+		UpdatedAt:               store.UpdatedAt,
 	}, nil
 }
 
@@ -178,7 +184,12 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 
 	userID := middlewares.GetUserID(request)
 
-	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone)
+	autoConfirmAppointments := true
+	if req.AutoConfirmAppointments != nil {
+		autoConfirmAppointments = *req.AutoConfirmAppointments
+	}
+
+	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -288,7 +299,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil {
+	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil {
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
@@ -306,7 +317,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone)
+	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

@@ -17,19 +17,21 @@ INSERT INTO stores (
     name,
     description,
     appointment_duration,
-    timezone
+    timezone,
+    auto_confirm_appointments
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
-RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone
+RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments
 `
 
 type CreateStoreParams struct {
-	UserID              pgtype.UUID `json:"user_id"`
-	Name                string      `json:"name"`
-	Description         *string     `json:"description"`
-	AppointmentDuration int32       `json:"appointment_duration"`
-	Timezone            string      `json:"timezone"`
+	UserID                  pgtype.UUID `json:"user_id"`
+	Name                    string      `json:"name"`
+	Description             *string     `json:"description"`
+	AppointmentDuration     int32       `json:"appointment_duration"`
+	Timezone                string      `json:"timezone"`
+	AutoConfirmAppointments bool        `json:"auto_confirm_appointments"`
 }
 
 func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store, error) {
@@ -39,6 +41,7 @@ func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store
 		arg.Description,
 		arg.AppointmentDuration,
 		arg.Timezone,
+		arg.AutoConfirmAppointments,
 	)
 	var i Store
 	err := row.Scan(
@@ -52,6 +55,7 @@ func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store
 		&i.DeletedAt,
 		&i.AppointmentDuration,
 		&i.Timezone,
+		&i.AutoConfirmAppointments,
 	)
 	return i, err
 }
@@ -72,7 +76,7 @@ func (q *Queries) DeleteStore(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getStoreByID = `-- name: GetStoreByID :one
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments FROM stores
 WHERE id = $1 
   AND deleted_at IS NULL
 LIMIT 1
@@ -92,12 +96,13 @@ func (q *Queries) GetStoreByID(ctx context.Context, id pgtype.UUID) (Store, erro
 		&i.DeletedAt,
 		&i.AppointmentDuration,
 		&i.Timezone,
+		&i.AutoConfirmAppointments,
 	)
 	return i, err
 }
 
 const getStoreByUserID = `-- name: GetStoreByUserID :one
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments FROM stores
 WHERE user_id = $1 
   AND deleted_at IS NULL
 LIMIT 1
@@ -117,12 +122,13 @@ func (q *Queries) GetStoreByUserID(ctx context.Context, userID pgtype.UUID) (Sto
 		&i.DeletedAt,
 		&i.AppointmentDuration,
 		&i.Timezone,
+		&i.AutoConfirmAppointments,
 	)
 	return i, err
 }
 
 const listStoresPaginated = `-- name: ListStoresPaginated :many
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments FROM stores
 WHERE deleted_at IS NULL
 ORDER BY name ASC
 LIMIT $1 OFFSET $2
@@ -153,6 +159,7 @@ func (q *Queries) ListStoresPaginated(ctx context.Context, arg ListStoresPaginat
 			&i.DeletedAt,
 			&i.AppointmentDuration,
 			&i.Timezone,
+			&i.AutoConfirmAppointments,
 		); err != nil {
 			return nil, err
 		}
@@ -172,19 +179,21 @@ SET
     is_active = COALESCE($4, is_active),
     appointment_duration = COALESCE($5, appointment_duration),
     timezone = COALESCE($6, timezone),
+    auto_confirm_appointments = COALESCE($7, auto_confirm_appointments),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL
-RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone
+RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments
 `
 
 type UpdateStoreParams struct {
-	ID                  pgtype.UUID `json:"id"`
-	Name                string      `json:"name"`
-	Description         *string     `json:"description"`
-	IsActive            bool        `json:"is_active"`
-	AppointmentDuration int32       `json:"appointment_duration"`
-	Timezone            string      `json:"timezone"`
+	ID                      pgtype.UUID `json:"id"`
+	Name                    string      `json:"name"`
+	Description             *string     `json:"description"`
+	IsActive                bool        `json:"is_active"`
+	AppointmentDuration     int32       `json:"appointment_duration"`
+	Timezone                string      `json:"timezone"`
+	AutoConfirmAppointments bool        `json:"auto_confirm_appointments"`
 }
 
 func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store, error) {
@@ -195,6 +204,7 @@ func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store
 		arg.IsActive,
 		arg.AppointmentDuration,
 		arg.Timezone,
+		arg.AutoConfirmAppointments,
 	)
 	var i Store
 	err := row.Scan(
@@ -208,6 +218,7 @@ func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store
 		&i.DeletedAt,
 		&i.AppointmentDuration,
 		&i.Timezone,
+		&i.AutoConfirmAppointments,
 	)
 	return i, err
 }

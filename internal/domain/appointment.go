@@ -2,6 +2,14 @@ package domain
 
 import "time"
 
+// Appointment status values.
+const (
+	AppointmentStatusPending   = "pending"
+	AppointmentStatusConfirmed = "confirmed"
+	AppointmentStatusCancelled = "cancelled"
+	AppointmentStatusCompleted = "completed"
+)
+
 // Appointment struct
 type Appointment struct {
 	ID        string
@@ -12,6 +20,16 @@ type Appointment struct {
 	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// AppointmentWithClient pairs an appointment with the basic profile of the client who booked it,
+// for views (like a store owner's appointment list) that need both together.
+type AppointmentWithClient struct {
+	Appointment
+	ClientUsername  string
+	ClientEmail     string
+	ClientFirstName string
+	ClientLastName  string
 }
 
 // NewAppointment constructor

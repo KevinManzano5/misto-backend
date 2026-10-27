@@ -22,15 +22,16 @@ type StoreRepository struct {
 // toDomainStore function
 func toDomainStore(store postgres.Store) *domain.Store {
 	return &domain.Store{
-		ID:                  store.ID.String(),
-		UserID:              store.UserID.String(),
-		Name:                store.Name,
-		Description:         *store.Description,
-		IsActive:            store.IsActive,
-		AppointmentDuration: store.AppointmentDuration,
-		Timezone:            store.Timezone,
-		CreatedAt:           store.CreatedAt.Time.UTC(),
-		UpdatedAt:           store.UpdatedAt.Time.UTC(),
+		ID:                      store.ID.String(),
+		UserID:                  store.UserID.String(),
+		Name:                    store.Name,
+		Description:             *store.Description,
+		IsActive:                store.IsActive,
+		AppointmentDuration:     store.AppointmentDuration,
+		Timezone:                store.Timezone,
+		AutoConfirmAppointments: store.AutoConfirmAppointments,
+		CreatedAt:               store.CreatedAt.Time.UTC(),
+		UpdatedAt:               store.UpdatedAt.Time.UTC(),
 	}
 }
 
@@ -51,11 +52,12 @@ func (repo *StoreRepository) CreateStore(ctx context.Context, store *domain.Stor
 	}
 
 	result, err := repo.queries.CreateStore(ctx, postgres.CreateStoreParams{
-		UserID:              userID,
-		Name:                store.Name,
-		Description:         &store.Description,
-		AppointmentDuration: store.AppointmentDuration,
-		Timezone:            store.Timezone,
+		UserID:                  userID,
+		Name:                    store.Name,
+		Description:             &store.Description,
+		AppointmentDuration:     store.AppointmentDuration,
+		Timezone:                store.Timezone,
+		AutoConfirmAppointments: store.AutoConfirmAppointments,
 	})
 
 	if err != nil {
@@ -96,11 +98,12 @@ func (repo *StoreRepository) CreateStoreWithSchedules(ctx context.Context, store
 	txQueries := repo.queries.WithTx(tx)
 
 	result, err := txQueries.CreateStore(ctx, postgres.CreateStoreParams{
-		UserID:              userID,
-		Name:                store.Name,
-		Description:         &store.Description,
-		AppointmentDuration: store.AppointmentDuration,
-		Timezone:            store.Timezone,
+		UserID:                  userID,
+		Name:                    store.Name,
+		Description:             &store.Description,
+		AppointmentDuration:     store.AppointmentDuration,
+		Timezone:                store.Timezone,
+		AutoConfirmAppointments: store.AutoConfirmAppointments,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -197,12 +200,13 @@ func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Stor
 	}
 
 	_, err := repo.queries.UpdateStore(ctx, postgres.UpdateStoreParams{
-		ID:                  storeID,
-		Name:                store.Name,
-		Description:         &store.Description,
-		IsActive:            store.IsActive,
-		AppointmentDuration: store.AppointmentDuration,
-		Timezone:            store.Timezone,
+		ID:                      storeID,
+		Name:                    store.Name,
+		Description:             &store.Description,
+		IsActive:                store.IsActive,
+		AppointmentDuration:     store.AppointmentDuration,
+		Timezone:                store.Timezone,
+		AutoConfirmAppointments: store.AutoConfirmAppointments,
 	})
 
 	if err != nil {

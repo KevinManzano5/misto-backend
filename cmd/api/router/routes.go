@@ -84,4 +84,5 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 	// Private
 	srv.RegisterRoutes("POST /api/v1/appointments", withAuth(appointment.Create))
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments", withAuth(appointment.GetBookedAppointments))
+	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/status", withAuth(appointment.UpdateStatus))
 }
