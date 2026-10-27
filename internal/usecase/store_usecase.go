@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
 )
@@ -16,6 +17,21 @@ const (
 
 // sunday is the domain.StoreSchedule.DayOfWeek value for Sunday, closed by default.
 const sunday = 0
+
+// defaultAppointmentDuration is applied to a store when it is created without one.
+const defaultAppointmentDuration = 30
+
+// defaultTimezone is applied to a store when it is created without one.
+const defaultTimezone = "UTC"
+
+// validateTimezone checks that name is a loadable IANA timezone (e.g. "America/Bogota").
+func validateTimezone(name string) error {
+	if _, err := time.LoadLocation(name); err != nil {
+		return fmt.Errorf("%w: invalid timezone %q", domain.ErrInvalidInput, name)
+	}
+
+	return nil
+}
 
 // StoreRepository interface
 type StoreRepository interface {
@@ -31,7 +47,6 @@ type StoreRepository interface {
 // ScheduleRepository interface
 type ScheduleRepository interface {
 	UpsertStoreSchedule(ctx context.Context, schedule *domain.StoreSchedule) error
-	GetStoreScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error)
 	ListStoreSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error)
 }
 
@@ -51,8 +66,18 @@ func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *Sto
 
 // Create method creates a store along with a default weekly schedule (open every day
 // 09:00-18:00, except Sunday which is closed), which the owner can later customize.
-func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool) (*domain.Store, error) {
-	store := domain.NewStore(userID, name, description, isActive)
+func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string) (*domain.Store, error) {
+	if appointmentDuration <= 0 {
+		appointmentDuration = defaultAppointmentDuration
+	}
+
+	if timezone == "" {
+		timezone = defaultTimezone
+	} else if err := validateTimezone(timezone); err != nil {
+		return nil, err
+	}
+
+	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone)
 	schedules := defaultWeeklySchedules()
 
 	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
@@ -109,7 +134,7 @@ func (usecase *StoreUseCase) List(ctx context.Context) ([]*domain.Store, error) 
 }
 
 // Update method applies the supplied changes to a store and returns the persisted store.
-func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool) (*domain.Store, error) {
+func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store to update: %w", err)
@@ -123,6 +148,15 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	}
 	if isActive != nil {
 		store.IsActive = *isActive
+	}
+	if appointmentDuration != nil {
+		store.AppointmentDuration = *appointmentDuration
+	}
+	if timezone != nil {
+		if err := validateTimezone(*timezone); err != nil {
+			return nil, err
+		}
+		store.Timezone = *timezone
 	}
 
 	if !store.IsValid() {
@@ -167,16 +201,6 @@ func (usecase *StoreUseCase) UpsertSchedule(ctx context.Context, storeID string,
 	return schedule, nil
 }
 
-// GetScheduleByDay method retrieves the schedule of a store for a specific day
-func (usecase *StoreUseCase) GetScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error) {
-	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
-	if err != nil {
-		return nil, fmt.Errorf("getting store schedule: %w", err)
-	}
-
-	return schedule, nil
-}
-
 // ListSchedules method retrieves all schedules for a store
 func (usecase *StoreUseCase) ListSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error) {
 	schedules, err := usecase.scheduleRepo.ListStoreSchedules(ctx, storeID)
@@ -185,108 +209,4 @@ func (usecase *StoreUseCase) ListSchedules(ctx context.Context, storeID string) 
 	}
 
 	return schedules, nil
-}
-
-// StoreServiceRepository interface
-type StoreServiceRepository interface {
-	CreateStoreService(ctx context.Context, service *domain.StoreService) error
-	GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error)
-	ListStoreServicesByStoreID(ctx context.Context, storeID string) ([]*domain.StoreService, error)
-	UpdateStoreService(ctx context.Context, service *domain.StoreService) error
-	DeleteStoreService(ctx context.Context, id string) error
-}
-
-// StoreServiceUseCase struct
-type StoreServiceUseCase struct {
-	repo StoreServiceRepository
-}
-
-// NewStoreServiceUseCase constructor
-func NewStoreServiceUseCase(repo StoreServiceRepository) *StoreServiceUseCase {
-	return &StoreServiceUseCase{
-		repo: repo,
-	}
-}
-
-// Create method
-func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, name, description string, durationMinutes int32, price float64, isActive bool) (*domain.StoreService, error) {
-	service := domain.NewStoreService(storeID, name, description, durationMinutes, price, isActive)
-
-	if !service.IsValid() {
-		return nil, domain.ErrInvalidInput
-	}
-
-	if err := usecase.repo.CreateStoreService(ctx, service); err != nil {
-		return nil, fmt.Errorf("creating store service: %w", err)
-	}
-
-	return service, nil
-}
-
-// GetByID method
-func (usecase *StoreServiceUseCase) GetByID(ctx context.Context, serviceID string) (*domain.StoreService, error) {
-	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
-	if err != nil {
-		return nil, fmt.Errorf("getting store service: %w", err)
-	}
-
-	return service, nil
-}
-
-// ListByStoreID method
-func (usecase *StoreServiceUseCase) ListByStoreID(ctx context.Context, storeID string) ([]*domain.StoreService, error) {
-	services, err := usecase.repo.ListStoreServicesByStoreID(ctx, storeID)
-	if err != nil {
-		return nil, fmt.Errorf("listing store services by store id: %w", err)
-	}
-
-	return services, nil
-}
-
-// Update method
-func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID string, name, description *string, durationMinutes *int32, price *float64, isActive *bool) (*domain.StoreService, error) {
-	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
-	if err != nil {
-		return nil, fmt.Errorf("getting store service to update: %w", err)
-	}
-
-	if name != nil {
-		service.Name = *name
-	}
-	if description != nil {
-		service.Description = *description
-	}
-	if durationMinutes != nil {
-		service.DurationMinutes = *durationMinutes
-	}
-	if price != nil {
-		service.Price = *price
-	}
-	if isActive != nil {
-		service.IsActive = *isActive
-	}
-
-	if !service.IsValid() {
-		return nil, domain.ErrInvalidInput
-	}
-
-	if err := usecase.repo.UpdateStoreService(ctx, service); err != nil {
-		return nil, fmt.Errorf("updating store service: %w", err)
-	}
-
-	updatedService, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
-	if err != nil {
-		return nil, fmt.Errorf("getting updated store service: %w", err)
-	}
-
-	return updatedService, nil
-}
-
-// Delete method
-func (usecase *StoreServiceUseCase) Delete(ctx context.Context, serviceID string) error {
-	if err := usecase.repo.DeleteStoreService(ctx, serviceID); err != nil {
-		return fmt.Errorf("deleting store service: %w", err)
-	}
-
-	return nil
 }

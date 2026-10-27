@@ -49,8 +49,8 @@ func (repository *UserRepository) Create(ctx context.Context, user *domain.User)
 	}
 
 	user.ID = result.ID.String()
-	user.CreatedAt = result.CreatedAt.Time
-	user.UpdatedAt = result.UpdatedAt.Time
+	user.CreatedAt = result.CreatedAt.Time.UTC()
+	user.UpdatedAt = result.UpdatedAt.Time.UTC()
 
 	return nil
 }
@@ -101,7 +101,7 @@ func toDomainUser(user postgres.User) *domain.User {
 		FirstName:    user.FirstName,
 		LastName:     user.LastName,
 		IsActive:     user.IsActive,
-		CreatedAt:    user.CreatedAt.Time,
-		UpdatedAt:    user.UpdatedAt.Time,
+		CreatedAt:    user.CreatedAt.Time.UTC(),
+		UpdatedAt:    user.UpdatedAt.Time.UTC(),
 	}
 }

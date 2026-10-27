@@ -2,9 +2,11 @@
 INSERT INTO stores (
     user_id,
     name,
-    description
+    description,
+    appointment_duration,
+    timezone
 ) VALUES (
-    $1, $2, $3
+    $1, $2, $3, $4, $5
 )
 RETURNING *;
 
@@ -32,8 +34,10 @@ SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
     is_active = COALESCE($4, is_active),
+    appointment_duration = COALESCE($5, appointment_duration),
+    timezone = COALESCE($6, timezone),
     updated_at = CURRENT_TIMESTAMP
-WHERE id = $1 
+WHERE id = $1
   AND deleted_at IS NULL
 RETURNING *;
 

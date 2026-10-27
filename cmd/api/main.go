@@ -85,7 +85,6 @@ func main() {
 	// Instantiation of repositories
 	userRepo := postgres.NewUserRepository(pool)
 	storeRepo := postgres.NewStoreRepository(pool)
-	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
 	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
 
@@ -93,8 +92,7 @@ func main() {
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
-	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo)
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeServiceRepo)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo)
 
 	// Utility configuration
 	validate := validator.New()
@@ -120,12 +118,11 @@ func main() {
 
 	// Grouping of handlers
 	handlers := &router.AppHandlers{
-		Health:       handler.NewHealthHandler(),
-		User:         handler.NewUserHandler(userUC, storeUC, validate, log),
-		Auth:         handler.NewAuthHandler(authUC, validate, log),
-		Store:        handler.NewStoreHandler(storeUC, validate, log),
-		StoreService: handler.NewStoreServiceHandler(storeServiceUC, appointmentUC, validate, log),
-		Appointment:  handler.NewAppointmentHandler(appointmentUC, validate, log),
+		Health:      handler.NewHealthHandler(),
+		User:        handler.NewUserHandler(userUC, storeUC, validate, log),
+		Auth:        handler.NewAuthHandler(authUC, validate, log),
+		Store:       handler.NewStoreHandler(storeUC, validate, log),
+		Appointment: handler.NewAppointmentHandler(appointmentUC, validate, log),
 	}
 
 	// Initialization of specific middlewares

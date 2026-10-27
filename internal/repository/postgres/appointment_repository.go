@@ -21,17 +21,19 @@ type AppointmentRepository struct {
 }
 
 // toDomainAppointment function
+//
+// Timestamps are normalized to UTC here, the single point where appointments cross from
+// Postgres into the domain, so every layer above works with a consistent timezone.
 func toDomainAppointment(appointment postgres.Appointment) *domain.Appointment {
 	return &domain.Appointment{
 		ID:        appointment.ID.String(),
 		StoreID:   appointment.StoreID.String(),
-		ServiceID: appointment.ServiceID.String(),
 		UserID:    appointment.ClientID.String(),
-		StartTime: appointment.StartTime.Time,
-		EndTime:   appointment.EndTime.Time,
+		StartTime: appointment.StartTime.Time.UTC(),
+		EndTime:   appointment.EndTime.Time.UTC(),
 		Status:    appointment.Status,
-		CreatedAt: appointment.CreatedAt.Time,
-		UpdatedAt: appointment.UpdatedAt.Time,
+		CreatedAt: appointment.CreatedAt.Time.UTC(),
+		UpdatedAt: appointment.UpdatedAt.Time.UTC(),
 	}
 }
 
@@ -47,13 +49,10 @@ func NewAppointmentRepository(pool *pgxpool.Pool) *AppointmentRepository {
 // inserts the appointment within a single transaction, so a concurrent request for the same
 // slot can never slip past the overlap check before either insert commits.
 func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appointment *domain.Appointment) error {
-	var storeID, serviceID, clientID pgtype.UUID
+	var storeID, clientID pgtype.UUID
 
 	if err := storeID.Scan(appointment.StoreID); err != nil {
 		return fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
-	}
-	if err := serviceID.Scan(appointment.ServiceID); err != nil {
-		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
 	}
 	if err := clientID.Scan(appointment.UserID); err != nil {
 		return fmt.Errorf("invalid userID: %w", domain.ErrInvalidInput)
@@ -87,7 +86,6 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	result, err := txQueries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
 		StoreID:   storeID,
-		ServiceID: serviceID,
 		ClientID:  clientID,
 		StartTime: start,
 		EndTime:   end,
@@ -102,8 +100,10 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	appointment.ID = result.ID.String()
 	appointment.Status = result.Status
-	appointment.CreatedAt = result.CreatedAt.Time
-	appointment.UpdatedAt = result.UpdatedAt.Time
+	appointment.StartTime = result.StartTime.Time.UTC()
+	appointment.EndTime = result.EndTime.Time.UTC()
+	appointment.CreatedAt = result.CreatedAt.Time.UTC()
+	appointment.UpdatedAt = result.UpdatedAt.Time.UTC()
 
 	return nil
 }
@@ -114,8 +114,8 @@ func translateAppointmentWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "23503": // foreign_key_violation: store_id, service_id or client_id does not reference an existing row
-			return fmt.Errorf("%w: referenced store, service or client does not exist", domain.ErrInvalidInput)
+		case "23503": // foreign_key_violation: store_id or client_id does not reference an existing row
+			return fmt.Errorf("%w: referenced store or client does not exist", domain.ErrInvalidInput)
 		case "23505": // unique_violation
 			return fmt.Errorf("%w", domain.ErrAlreadyExists)
 		}

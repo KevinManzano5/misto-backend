@@ -11,19 +11,18 @@ import (
 
 // AppHandlers groups all instantiated handlers to facilitate dependency injection.
 type AppHandlers struct {
-	Health       http.Handler
-	User         *handler.UserHandler
-	Auth         *handler.AuthHandler
-	Store        *handler.StoreHandler
-	StoreService *handler.StoreServiceHandler
-	Appointment  *handler.AppointmentHandler
+	Health      http.Handler
+	User        *handler.UserHandler
+	Auth        *handler.AuthHandler
+	Store       *handler.StoreHandler
+	Appointment *handler.AppointmentHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
 func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middleware) {
 	setupSystemRoutes(srv, h.Health)
 	setupAuthRoutes(srv, h.Auth, h.User, authMW)
-	setupStoreRoutes(srv, h.Store, h.StoreService, authMW)
+	setupStoreRoutes(srv, h.Store, authMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 }
 
@@ -48,8 +47,10 @@ func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handle
 	srv.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(user.Get))
 }
 
-// setupStoreRoutes registers endpoints for managing stores and their services (mixed)
-func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, service *handler.StoreServiceHandler, authMW middlewares.Middleware) {
+// setupStoreRoutes registers endpoints for managing stores and their schedules (mixed).
+// A store's weekly schedules are embedded directly in its GET response (storeResponse.Schedules),
+// so there is no separate read endpoint for them; only the mutation route remains.
+func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW middlewares.Middleware) {
 	// Helper for wrapping protected handlers
 	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
 		return middlewares.Chain(handlerFunc, authMW)
@@ -66,31 +67,21 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, service *
 	srv.RegisterRoutes("DELETE /api/v1/stores/{id}", withAuth(store.DeleteStore))
 
 	// === Store schedules routes ===
-	// Public
-	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/schedules", http.HandlerFunc(store.ListSchedules))
-	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/schedules/{day}", http.HandlerFunc(store.GetScheduleByDay))
-
 	// Private
 	srv.RegisterRoutes("PUT /api/v1/stores/{storeId}/schedules/{day}", withAuth(store.UpsertSchedule))
-
-	// === Store services routes ===
-	// Public
-	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/services", http.HandlerFunc(service.ListByStoreID))
-	srv.RegisterRoutes("GET /api/v1/services/{id}", http.HandlerFunc(service.GetByID))
-	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/availability", http.HandlerFunc(service.GetAvailability))
-
-	// Private
-	srv.RegisterRoutes("POST /api/v1/stores/{storeId}/services", withAuth(service.Create))
-	srv.RegisterRoutes("PATCH /api/v1/services/{id}", withAuth(service.Update))
-	srv.RegisterRoutes("DELETE /api/v1/services/{id}", withAuth(service.Delete))
 }
 
-// setupAppointmentRoutes registers endpoints for appointment management (Private)
+// setupAppointmentRoutes registers endpoints for appointment management (mixed)
 func setupAppointmentRoutes(srv *server.Server, appointment *handler.AppointmentHandler, authMW middlewares.Middleware) {
 	// Helper for wrapping protected handlers
 	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
 		return middlewares.Chain(handlerFunc, authMW)
 	}
 
+	// Public
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/availability", http.HandlerFunc(appointment.GetAvailableSlots))
+
+	// Private
 	srv.RegisterRoutes("POST /api/v1/appointments", withAuth(appointment.Create))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments", withAuth(appointment.GetBookedAppointments))
 }

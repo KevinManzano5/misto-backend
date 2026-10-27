@@ -37,20 +37,18 @@ const createAppointment = `-- name: CreateAppointment :one
 
 INSERT INTO appointments (
     store_id,
-    service_id,
     client_id,
     start_time,
     end_time,
     status
 ) VALUES (
-    $1, $2, $3, $4, $5, 'confirmed'
+    $1, $2, $3, $4, 'confirmed'
 )
-RETURNING id, store_id, service_id, client_id, start_time, end_time, status, created_at, updated_at
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at
 `
 
 type CreateAppointmentParams struct {
 	StoreID   pgtype.UUID        `json:"store_id"`
-	ServiceID pgtype.UUID        `json:"service_id"`
 	ClientID  pgtype.UUID        `json:"client_id"`
 	StartTime pgtype.Timestamptz `json:"start_time"`
 	EndTime   pgtype.Timestamptz `json:"end_time"`
@@ -60,7 +58,6 @@ type CreateAppointmentParams struct {
 func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error) {
 	row := q.db.QueryRow(ctx, createAppointment,
 		arg.StoreID,
-		arg.ServiceID,
 		arg.ClientID,
 		arg.StartTime,
 		arg.EndTime,
@@ -69,7 +66,6 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 	err := row.Scan(
 		&i.ID,
 		&i.StoreID,
-		&i.ServiceID,
 		&i.ClientID,
 		&i.StartTime,
 		&i.EndTime,
@@ -80,52 +76,8 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 	return i, err
 }
 
-const createService = `-- name: CreateService :one
-INSERT INTO store_services (
-    store_id,
-    name,
-    description,
-    duration_minutes,
-    price
-) VALUES (
-    $1, $2, $3, $4, $5
-)
-RETURNING id, store_id, name, description, duration_minutes, price, is_active, created_at, updated_at
-`
-
-type CreateServiceParams struct {
-	StoreID         pgtype.UUID    `json:"store_id"`
-	Name            string         `json:"name"`
-	Description     *string        `json:"description"`
-	DurationMinutes int32          `json:"duration_minutes"`
-	Price           pgtype.Numeric `json:"price"`
-}
-
-func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (StoreService, error) {
-	row := q.db.QueryRow(ctx, createService,
-		arg.StoreID,
-		arg.Name,
-		arg.Description,
-		arg.DurationMinutes,
-		arg.Price,
-	)
-	var i StoreService
-	err := row.Scan(
-		&i.ID,
-		&i.StoreID,
-		&i.Name,
-		&i.Description,
-		&i.DurationMinutes,
-		&i.Price,
-		&i.IsActive,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const listAppointmentsByStoreDate = `-- name: ListAppointmentsByStoreDate :many
-SELECT id, store_id, service_id, client_id, start_time, end_time, status, created_at, updated_at FROM appointments
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at FROM appointments
 WHERE store_id = $1
   AND start_time >= $2
   AND start_time <= $3
@@ -152,48 +104,10 @@ func (q *Queries) ListAppointmentsByStoreDate(ctx context.Context, arg ListAppoi
 		if err := rows.Scan(
 			&i.ID,
 			&i.StoreID,
-			&i.ServiceID,
 			&i.ClientID,
 			&i.StartTime,
 			&i.EndTime,
 			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStoreServices = `-- name: ListStoreServices :many
-SELECT id, store_id, name, description, duration_minutes, price, is_active, created_at, updated_at FROM store_services
-WHERE store_id = $1 
-  AND is_active = TRUE
-ORDER BY name ASC
-`
-
-func (q *Queries) ListStoreServices(ctx context.Context, storeID pgtype.UUID) ([]StoreService, error) {
-	rows, err := q.db.Query(ctx, listStoreServices, storeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []StoreService{}
-	for rows.Next() {
-		var i StoreService
-		if err := rows.Scan(
-			&i.ID,
-			&i.StoreID,
-			&i.Name,
-			&i.Description,
-			&i.DurationMinutes,
-			&i.Price,
-			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
