@@ -171,14 +171,28 @@ func (repo *AppointmentRepository) ListAppointmentsByStoreDate(ctx context.Conte
 
 // ListAllAppointmentsByStoreWithClient method returns every appointment ever booked at storeID,
 // any status, most recent first, each paired with the basic profile of the client who booked it.
-func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string) ([]*domain.AppointmentWithClient, error) {
+// startTime/endTime optionally restrict the results to an inclusive start_time range; either or
+// both may be nil to leave that side of the range open.
+func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string, startTime, endTime *time.Time) ([]*domain.AppointmentWithClient, error) {
 	var sID pgtype.UUID
 
 	if err := sID.Scan(storeID); err != nil {
 		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
 	}
 
-	results, err := repo.queries.ListAllAppointmentsByStoreWithClient(ctx, sID)
+	var start, end pgtype.Timestamptz
+	if startTime != nil {
+		start = pgtype.Timestamptz{Time: *startTime, Valid: true}
+	}
+	if endTime != nil {
+		end = pgtype.Timestamptz{Time: *endTime, Valid: true}
+	}
+
+	results, err := repo.queries.ListAllAppointmentsByStoreWithClient(ctx, postgres.ListAllAppointmentsByStoreWithClientParams{
+		StoreID:   sID,
+		StartDate: start,
+		EndDate:   end,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("listing all appointments: %w", err)
 	}
@@ -206,6 +220,40 @@ func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx cont
 	return appointments, nil
 }
 
+// ListAppointmentsByClient method returns every appointment ever booked by clientID, any status,
+// most recent first, each paired with the basic info of the store it was booked at.
+func (repo *AppointmentRepository) ListAppointmentsByClient(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error) {
+	var cID pgtype.UUID
+
+	if err := cID.Scan(clientID); err != nil {
+		return nil, fmt.Errorf("invalid clientID: %w", domain.ErrInvalidInput)
+	}
+
+	results, err := repo.queries.ListAppointmentsByClient(ctx, cID)
+	if err != nil {
+		return nil, fmt.Errorf("listing appointments by client: %w", err)
+	}
+
+	appointments := make([]*domain.AppointmentWithStore, 0, len(results))
+	for _, result := range results {
+		appointments = append(appointments, &domain.AppointmentWithStore{
+			Appointment: domain.Appointment{
+				ID:        result.ID.String(),
+				StoreID:   result.StoreID.String(),
+				UserID:    result.ClientID.String(),
+				StartTime: result.StartTime.Time.UTC(),
+				EndTime:   result.EndTime.Time.UTC(),
+				Status:    result.Status,
+				CreatedAt: result.CreatedAt.Time.UTC(),
+				UpdatedAt: result.UpdatedAt.Time.UTC(),
+			},
+			StoreName: result.StoreName,
+		})
+	}
+
+	return appointments, nil
+}
+
 // GetAppointmentByID method
 func (repo *AppointmentRepository) GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error) {
 	var appointmentID pgtype.UUID
@@ -223,6 +271,23 @@ func (repo *AppointmentRepository) GetAppointmentByID(ctx context.Context, id st
 	}
 
 	return toDomainAppointment(result), nil
+}
+
+// ExpireOverdueAppointments moves pending/confirmed appointments whose end_time is before
+// `before` to a terminal status (completed/expired) in a single bulk update, and returns the
+// rows that were changed.
+func (repo *AppointmentRepository) ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error) {
+	results, err := repo.queries.ExpireOverdueAppointments(ctx, pgtype.Timestamptz{Time: before, Valid: true})
+	if err != nil {
+		return nil, fmt.Errorf("expiring overdue appointments: %w", err)
+	}
+
+	appointments := make([]*domain.Appointment, 0, len(results))
+	for _, result := range results {
+		appointments = append(appointments, toDomainAppointment(result))
+	}
+
+	return appointments, nil
 }
 
 // UpdateAppointmentStatus method

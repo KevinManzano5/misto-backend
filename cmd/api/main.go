@@ -15,6 +15,7 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/logger"
 	"github.com/KevinManzano5/misto-backend/internal/middlewares"
 	"github.com/KevinManzano5/misto-backend/internal/repository/postgres"
+	"github.com/KevinManzano5/misto-backend/internal/scheduler"
 	"github.com/KevinManzano5/misto-backend/internal/server"
 	"github.com/KevinManzano5/misto-backend/internal/usecase"
 	"github.com/KevinManzano5/misto-backend/internal/validator"
@@ -94,6 +95,13 @@ func main() {
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
 	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo)
 
+	// Background jobs
+	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)
+	appointmentExpirer := scheduler.NewAppointmentExpirer(appointmentUC, appointmentExpiryInterval, log)
+	expirerCtx, cancelExpirer := context.WithCancel(context.Background())
+	defer cancelExpirer()
+	go appointmentExpirer.Start(expirerCtx)
+
 	// Utility configuration
 	validate := validator.New()
 
@@ -136,6 +144,25 @@ func main() {
 		log.Error("fatal error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// appointmentExpiryIntervalFromEnv reads APPOINTMENT_EXPIRY_INTERVAL (a Go duration string, e.g.
+// "5m") and falls back to a 5 minute default when unset or invalid.
+func appointmentExpiryIntervalFromEnv(log *slog.Logger) time.Duration {
+	const defaultInterval = 5 * time.Minute
+
+	raw := os.Getenv("APPOINTMENT_EXPIRY_INTERVAL")
+	if raw == "" {
+		return defaultInterval
+	}
+
+	interval, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Error("invalid APPOINTMENT_EXPIRY_INTERVAL, using default", slog.Any("error", err), slog.Duration("default", defaultInterval))
+		return defaultInterval
+	}
+
+	return interval
 }
 
 func setupLogger() *slog.Logger {

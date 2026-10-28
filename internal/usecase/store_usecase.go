@@ -22,7 +22,7 @@ const sunday = 0
 const defaultAppointmentDuration = 30
 
 // defaultTimezone is applied to a store when it is created without one.
-const defaultTimezone = "UTC"
+const defaultTimezone = "America/Bogota"
 
 // validateTimezone checks that name is a loadable IANA timezone (e.g. "America/Bogota").
 func validateTimezone(name string) error {

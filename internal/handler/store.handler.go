@@ -37,7 +37,7 @@ type createStoreRequest struct {
 	Name                string `json:"name" validate:"required,min=2,max=30"`
 	Description         string `json:"description" validate:"required"`
 	AppointmentDuration int32  `json:"appointment_duration" validate:"omitempty,min=1"`
-	// Timezone is the store's IANA timezone (e.g. "America/Bogota"). Defaults to "UTC" when omitted.
+	// Timezone is the store's IANA timezone (e.g. "America/Bogota"). Defaults to "America/Bogota" when omitted.
 	Timezone string `json:"timezone" validate:"omitempty"`
 	// AutoConfirmAppointments controls whether new appointments are confirmed immediately or
 	// left pending for the owner to approve/reject. Defaults to true (auto-confirm) when omitted.

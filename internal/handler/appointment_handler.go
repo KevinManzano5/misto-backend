@@ -185,17 +185,22 @@ type bookedAppointmentResponse struct {
 // GetBookedAppointments endpoint (e.g., GET /stores/{storeId}/appointments)
 //
 // @Summary Get a store's booked appointments
-// @Description Lists every appointment ever booked at a store, any status, with the booking client's basic profile. Only the store's owner may call this.
+// @Description Lists every appointment ever booked at a store, any status, with the booking client's basic profile. Only the store's owner may call this. Optionally restrict results to appointments starting within [start_date, end_date] (either may be omitted to leave that side open).
 // @Tags appointments
 // @Produce json
 // @Param storeId path string true "Store ID"
+// @Param start_date query string false "Only appointments starting on/after this date (YYYY-MM-DD, store's timezone)"
+// @Param end_date query string false "Only appointments starting on/before this date (YYYY-MM-DD, store's timezone)"
 // @Success 200 {array} bookedAppointmentResponse
+// @Failure 400 {object} ProblemDetails
 // @Failure 403 {object} ProblemDetails
 // @Router /stores/{storeId}/appointments [get]
 func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWriter, request *http.Request) {
 	storeID := request.PathValue("storeId")
+	startDate := request.URL.Query().Get("start_date")
+	endDate := request.URL.Query().Get("end_date")
 
-	appointments, err := handler.usecase.GetBookedAppointments(request.Context(), storeID, middlewares.GetUserID(request))
+	appointments, err := handler.usecase.GetBookedAppointments(request.Context(), storeID, middlewares.GetUserID(request), startDate, endDate)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -229,6 +234,54 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 // updateAppointmentStatusRequest struct
 type updateAppointmentStatusRequest struct {
 	Status string `json:"status" validate:"required,oneof=confirmed cancelled"`
+}
+
+// myAppointmentResponse struct
+type myAppointmentResponse struct {
+	ID        string    `json:"id"`
+	StoreID   string    `json:"store_id"`
+	StoreName string    `json:"store_name"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Status    string    `json:"status"`
+}
+
+// GetMyAppointments endpoint (e.g., GET /appointments)
+//
+// @Summary Get the authenticated user's own appointments
+// @Description Lists every appointment ever booked by the authenticated user, any status, with the basic info of the store it was booked at.
+// @Tags appointments
+// @Produce json
+// @Success 200 {array} myAppointmentResponse
+// @Router /appointments [get]
+func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter, request *http.Request) {
+	appointments, err := handler.usecase.ListMyAppointments(request.Context(), middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]myAppointmentResponse, 0, len(appointments))
+	for _, appointment := range appointments {
+		response = append(response, myAppointmentResponse{
+			ID:        appointment.ID,
+			StoreID:   appointment.StoreID,
+			StoreName: appointment.StoreName,
+			StartTime: appointment.StartTime,
+			EndTime:   appointment.EndTime,
+			Status:    appointment.Status,
+		})
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
 }
 
 // UpdateStatus endpoint (e.g., PATCH /appointments/{id}/status)
@@ -282,6 +335,44 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 	}
 
 	appointment, err := handler.usecase.UpdateStatus(request.Context(), id, middlewares.GetUserID(request), req.Status)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
+		ID:        appointment.ID,
+		StoreID:   appointment.StoreID,
+		UserID:    appointment.UserID,
+		StartTime: appointment.StartTime,
+		EndTime:   appointment.EndTime,
+		Status:    appointment.Status,
+	}); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// Cancel endpoint (e.g., PATCH /appointments/{id}/cancel)
+//
+// @Summary Cancel an appointment
+// @Description Moves a pending or confirmed appointment to cancelled. Either the client who booked it or the store's owner may call this.
+// @Tags appointments
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Success 200 {object} appointmentResponse
+// @Failure 400 {object} ProblemDetails
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/cancel [patch]
+func (handler *AppointmentHandler) Cancel(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	appointment, err := handler.usecase.Cancel(request.Context(), id, middlewares.GetUserID(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

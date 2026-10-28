@@ -8,6 +8,7 @@ const (
 	AppointmentStatusConfirmed = "confirmed"
 	AppointmentStatusCancelled = "cancelled"
 	AppointmentStatusCompleted = "completed"
+	AppointmentStatusExpired   = "expired"
 )
 
 // Appointment struct
@@ -30,6 +31,13 @@ type AppointmentWithClient struct {
 	ClientEmail     string
 	ClientFirstName string
 	ClientLastName  string
+}
+
+// AppointmentWithStore pairs an appointment with the basic info of the store it was booked at,
+// for a client's own "my appointments" view.
+type AppointmentWithStore struct {
+	Appointment
+	StoreName string
 }
 
 // NewAppointment constructor
