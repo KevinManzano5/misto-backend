@@ -8,9 +8,10 @@ INSERT INTO stores (
     auto_confirm_appointments,
     email,
     address,
-    allow_same_day_appointments
+    allow_same_day_appointments,
+    phone_number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 RETURNING *;
 
@@ -44,6 +45,7 @@ SET
     email = COALESCE($8, email),
     address = COALESCE($9, address),
     allow_same_day_appointments = COALESCE($10, allow_same_day_appointments),
+    phone_number = COALESCE($11, phone_number),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL

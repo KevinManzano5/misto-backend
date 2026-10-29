@@ -9,14 +9,15 @@ import (
 )
 
 type Appointment struct {
-	ID        pgtype.UUID        `json:"id"`
-	StoreID   pgtype.UUID        `json:"store_id"`
-	ClientID  pgtype.UUID        `json:"client_id"`
-	StartTime pgtype.Timestamptz `json:"start_time"`
-	EndTime   pgtype.Timestamptz `json:"end_time"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	ClientID           pgtype.UUID        `json:"client_id"`
+	StartTime          pgtype.Timestamptz `json:"start_time"`
+	EndTime            pgtype.Timestamptz `json:"end_time"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CancellationReason *string            `json:"cancellation_reason"`
 }
 
 type Store struct {
@@ -34,6 +35,7 @@ type Store struct {
 	Email                    *string            `json:"email"`
 	Address                  *string            `json:"address"`
 	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
+	PhoneNumber              *string            `json:"phone_number"`
 }
 
 type StoreSchedule struct {

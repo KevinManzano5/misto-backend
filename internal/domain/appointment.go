@@ -19,8 +19,10 @@ type Appointment struct {
 	StartTime time.Time
 	EndTime   time.Time
 	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// CancellationReason is the reason given when the appointment was cancelled, empty otherwise.
+	CancellationReason string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // AppointmentWithClient pairs an appointment with the basic profile of the client who booked it,

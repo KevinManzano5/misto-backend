@@ -45,6 +45,7 @@ SELECT
     a.start_time,
     a.end_time,
     a.status,
+    a.cancellation_reason,
     a.created_at,
     a.updated_at,
     u.username AS client_username,
@@ -67,6 +68,7 @@ LIMIT 1;
 UPDATE appointments
 SET
     status = $2,
+    cancellation_reason = sqlc.narg(cancellation_reason),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING *;

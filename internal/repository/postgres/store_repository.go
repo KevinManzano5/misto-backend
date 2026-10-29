@@ -21,13 +21,16 @@ type StoreRepository struct {
 
 // toDomainStore function
 func toDomainStore(store postgres.Store) *domain.Store {
-	var email, address string
+	var email, address, phoneNumber string
 
 	if store.Email != nil {
 		email = *store.Email
 	}
 	if store.Address != nil {
 		address = *store.Address
+	}
+	if store.PhoneNumber != nil {
+		phoneNumber = *store.PhoneNumber
 	}
 
 	return &domain.Store{
@@ -42,6 +45,7 @@ func toDomainStore(store postgres.Store) *domain.Store {
 		Email:                    email,
 		Address:                  address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              phoneNumber,
 		CreatedAt:                store.CreatedAt.Time.UTC(),
 		UpdatedAt:                store.UpdatedAt.Time.UTC(),
 	}
@@ -73,6 +77,7 @@ func (repo *StoreRepository) CreateStore(ctx context.Context, store *domain.Stor
 		Email:                    &store.Email,
 		Address:                  &store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              &store.PhoneNumber,
 	})
 
 	if err != nil {
@@ -122,6 +127,7 @@ func (repo *StoreRepository) CreateStoreWithSchedules(ctx context.Context, store
 		Email:                    &store.Email,
 		Address:                  &store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              &store.PhoneNumber,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -228,6 +234,7 @@ func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Stor
 		Email:                    &store.Email,
 		Address:                  &store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              &store.PhoneNumber,
 	})
 
 	if err != nil {

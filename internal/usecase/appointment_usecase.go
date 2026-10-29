@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
@@ -17,7 +18,7 @@ type AppointmentRepository interface {
 	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string, startTime, endTime *time.Time) ([]*domain.AppointmentWithClient, error)
 	ListAppointmentsByClient(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
-	UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error)
+	UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
 	ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
 }
 
@@ -372,8 +373,13 @@ func (usecase *AppointmentUseCase) ListMyAppointments(ctx context.Context, userI
 // Cancel moves a pending or confirmed appointment to cancelled. Either the client who booked it
 // (requesterUserID matches the appointment's UserID) or the store's owner may cancel it; anyone
 // else gets domain.ErrForbidden. An appointment that is already cancelled/completed/expired is
-// rejected with domain.ErrInvalidInput since there's nothing left to cancel.
-func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, requesterUserID string) (*domain.Appointment, error) {
+// rejected with domain.ErrInvalidInput since there's nothing left to cancel. A non-empty reason
+// is required so cancellations are always auditable.
+func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, requesterUserID, reason string) (*domain.Appointment, error) {
+	if strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("%w: a cancellation reason is required", domain.ErrInvalidInput)
+	}
+
 	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
 	if err != nil {
 		return nil, fmt.Errorf("getting appointment: %w", err)
@@ -392,7 +398,7 @@ func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, re
 		return nil, fmt.Errorf("%w: only a pending or confirmed appointment can be cancelled", domain.ErrInvalidInput)
 	}
 
-	cancelled, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, domain.AppointmentStatusCancelled)
+	cancelled, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, domain.AppointmentStatusCancelled, reason)
 	if err != nil {
 		return nil, fmt.Errorf("cancelling appointment: %w", err)
 	}
@@ -403,10 +409,15 @@ func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, re
 // UpdateStatus moves a pending appointment to confirmed (approved) or cancelled (rejected).
 // Only the store's owner (requesterUserID) may do this, and only while the appointment is still
 // pending: anyone else gets domain.ErrForbidden, and any other starting status is rejected with
-// domain.ErrInvalidInput since it's no longer awaiting a decision.
-func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus string) (*domain.Appointment, error) {
+// domain.ErrInvalidInput since it's no longer awaiting a decision. Rejecting (newStatus ==
+// cancelled) requires a non-empty reason, auditable like any other cancellation.
+func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus, reason string) (*domain.Appointment, error) {
 	if newStatus != domain.AppointmentStatusConfirmed && newStatus != domain.AppointmentStatusCancelled {
 		return nil, fmt.Errorf("%w: status must be %q or %q", domain.ErrInvalidInput, domain.AppointmentStatusConfirmed, domain.AppointmentStatusCancelled)
+	}
+
+	if newStatus == domain.AppointmentStatusCancelled && strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("%w: a cancellation reason is required", domain.ErrInvalidInput)
 	}
 
 	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
@@ -427,7 +438,7 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 		return nil, fmt.Errorf("%w: appointment is not pending approval", domain.ErrInvalidInput)
 	}
 
-	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus)
+	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus, reason)
 	if err != nil {
 		return nil, fmt.Errorf("updating appointment status: %w", err)
 	}

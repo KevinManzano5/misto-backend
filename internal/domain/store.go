@@ -23,12 +23,14 @@ type Store struct {
 	// AllowSameDayAppointments controls whether a client can book an appointment on the same
 	// calendar day it is requested, in the store's own timezone.
 	AllowSameDayAppointments bool
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	// PhoneNumber is the store's contact phone number, in E.164 format (e.g. "+573001234567").
+	PhoneNumber string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // NewStore function
-func NewStore(userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool) *Store {
+func NewStore(userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string) *Store {
 	now := time.Now()
 
 	return &Store{
@@ -42,6 +44,7 @@ func NewStore(userID, name, description string, isActive bool, appointmentDurati
 		Email:                    email,
 		Address:                  address,
 		AllowSameDayAppointments: allowSameDayAppointments,
+		PhoneNumber:              phoneNumber,
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}

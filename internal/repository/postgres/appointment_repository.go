@@ -25,15 +25,21 @@ type AppointmentRepository struct {
 // Timestamps are normalized to UTC here, the single point where appointments cross from
 // Postgres into the domain, so every layer above works with a consistent timezone.
 func toDomainAppointment(appointment postgres.Appointment) *domain.Appointment {
+	var cancellationReason string
+	if appointment.CancellationReason != nil {
+		cancellationReason = *appointment.CancellationReason
+	}
+
 	return &domain.Appointment{
-		ID:        appointment.ID.String(),
-		StoreID:   appointment.StoreID.String(),
-		UserID:    appointment.ClientID.String(),
-		StartTime: appointment.StartTime.Time.UTC(),
-		EndTime:   appointment.EndTime.Time.UTC(),
-		Status:    appointment.Status,
-		CreatedAt: appointment.CreatedAt.Time.UTC(),
-		UpdatedAt: appointment.UpdatedAt.Time.UTC(),
+		ID:                 appointment.ID.String(),
+		StoreID:            appointment.StoreID.String(),
+		UserID:             appointment.ClientID.String(),
+		StartTime:          appointment.StartTime.Time.UTC(),
+		EndTime:            appointment.EndTime.Time.UTC(),
+		Status:             appointment.Status,
+		CancellationReason: cancellationReason,
+		CreatedAt:          appointment.CreatedAt.Time.UTC(),
+		UpdatedAt:          appointment.UpdatedAt.Time.UTC(),
 	}
 }
 
@@ -199,16 +205,22 @@ func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx cont
 
 	appointments := make([]*domain.AppointmentWithClient, 0, len(results))
 	for _, result := range results {
+		var cancellationReason string
+		if result.CancellationReason != nil {
+			cancellationReason = *result.CancellationReason
+		}
+
 		appointments = append(appointments, &domain.AppointmentWithClient{
 			Appointment: domain.Appointment{
-				ID:        result.ID.String(),
-				StoreID:   result.StoreID.String(),
-				UserID:    result.ClientID.String(),
-				StartTime: result.StartTime.Time.UTC(),
-				EndTime:   result.EndTime.Time.UTC(),
-				Status:    result.Status,
-				CreatedAt: result.CreatedAt.Time.UTC(),
-				UpdatedAt: result.UpdatedAt.Time.UTC(),
+				ID:                 result.ID.String(),
+				StoreID:            result.StoreID.String(),
+				UserID:             result.ClientID.String(),
+				StartTime:          result.StartTime.Time.UTC(),
+				EndTime:            result.EndTime.Time.UTC(),
+				Status:             result.Status,
+				CancellationReason: cancellationReason,
+				CreatedAt:          result.CreatedAt.Time.UTC(),
+				UpdatedAt:          result.UpdatedAt.Time.UTC(),
 			},
 			ClientUsername:  result.ClientUsername,
 			ClientEmail:     result.ClientEmail,
@@ -290,17 +302,24 @@ func (repo *AppointmentRepository) ExpireOverdueAppointments(ctx context.Context
 	return appointments, nil
 }
 
-// UpdateAppointmentStatus method
-func (repo *AppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error) {
+// UpdateAppointmentStatus method. cancellationReason is persisted as-is (nil when empty), so a
+// transition away from cancelled implicitly clears any previous reason.
+func (repo *AppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error) {
 	var appointmentID pgtype.UUID
 
 	if err := appointmentID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid appointmentID: %w", domain.ErrInvalidInput)
 	}
 
+	var reason *string
+	if cancellationReason != "" {
+		reason = &cancellationReason
+	}
+
 	result, err := repo.queries.UpdateAppointmentStatus(ctx, postgres.UpdateAppointmentStatusParams{
-		ID:     appointmentID,
-		Status: status,
+		ID:                 appointmentID,
+		Status:             status,
+		CancellationReason: reason,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

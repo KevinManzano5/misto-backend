@@ -14,7 +14,7 @@ import (
 type fakeAppointmentRepository struct {
 	expireOverdueAppointmentsFunc func(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
 	getAppointmentByIDFunc        func(ctx context.Context, id string) (*domain.Appointment, error)
-	updateAppointmentStatusFunc   func(ctx context.Context, id, status string) (*domain.Appointment, error)
+	updateAppointmentStatusFunc   func(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
 	listAppointmentsByClientFunc  func(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 }
 
@@ -34,8 +34,8 @@ func (f *fakeAppointmentRepository) GetAppointmentByID(ctx context.Context, id s
 	return f.getAppointmentByIDFunc(ctx, id)
 }
 
-func (f *fakeAppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error) {
-	return f.updateAppointmentStatusFunc(ctx, id, status)
+func (f *fakeAppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error) {
+	return f.updateAppointmentStatusFunc(ctx, id, status, cancellationReason)
 }
 
 func (f *fakeAppointmentRepository) ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error) {
@@ -239,11 +239,11 @@ func TestCancel(t *testing.T) {
 				getAppointmentByIDFunc: func(ctx context.Context, id string) (*domain.Appointment, error) {
 					return tt.appointment, nil
 				},
-				updateAppointmentStatusFunc: func(ctx context.Context, id, status string) (*domain.Appointment, error) {
+				updateAppointmentStatusFunc: func(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error) {
 					if status != domain.AppointmentStatusCancelled {
 						t.Fatalf("expected status %q, got %q", domain.AppointmentStatusCancelled, status)
 					}
-					return &domain.Appointment{ID: id, StoreID: tt.appointment.StoreID, UserID: tt.appointment.UserID, Status: status}, nil
+					return &domain.Appointment{ID: id, StoreID: tt.appointment.StoreID, UserID: tt.appointment.UserID, Status: status, CancellationReason: cancellationReason}, nil
 				},
 			}
 			storeRepo := &fakeAppointmentStoreRepository{
@@ -253,7 +253,7 @@ func TestCancel(t *testing.T) {
 			}
 			uc := NewAppointmentUseCase(repo, nil, storeRepo)
 
-			cancelled, err := uc.Cancel(context.Background(), appointmentID, tt.requesterUserID)
+			cancelled, err := uc.Cancel(context.Background(), appointmentID, tt.requesterUserID, "no longer needed")
 
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -268,6 +268,14 @@ func TestCancel(t *testing.T) {
 				t.Fatalf("expected status %q, got %q", domain.AppointmentStatusCancelled, cancelled.Status)
 			}
 		})
+	}
+}
+
+func TestCancel_RejectsEmptyReason(t *testing.T) {
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, &fakeAppointmentStoreRepository{})
+
+	if _, err := uc.Cancel(context.Background(), "appointment-1", "client-1", "   "); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
 	}
 }
 

@@ -49,6 +49,8 @@ type createStoreRequest struct {
 	// AllowSameDayAppointments controls whether a client can book an appointment on the same
 	// calendar day it is requested. Defaults to true (allowed) when omitted.
 	AllowSameDayAppointments *bool `json:"allow_same_day_appointments"`
+	// PhoneNumber is the store's contact phone number, in E.164 format (e.g. "+573001234567").
+	PhoneNumber string `json:"phone_number" validate:"omitempty,e164"`
 }
 
 type updateStoreRequest struct {
@@ -61,6 +63,7 @@ type updateStoreRequest struct {
 	Email                    *string `json:"email" validate:"omitempty,email"`
 	Address                  *string `json:"address"`
 	AllowSameDayAppointments *bool   `json:"allow_same_day_appointments"`
+	PhoneNumber              *string `json:"phone_number" validate:"omitempty,e164"`
 }
 
 type storeResponse struct {
@@ -75,6 +78,7 @@ type storeResponse struct {
 	Email                    string                  `json:"email"`
 	Address                  string                  `json:"address"`
 	AllowSameDayAppointments bool                    `json:"allow_same_day_appointments"`
+	PhoneNumber              string                  `json:"phone_number"`
 	Schedules                []storeScheduleResponse `json:"schedules"`
 	CreatedAt                time.Time               `json:"created_at"`
 	UpdatedAt                time.Time               `json:"updated_at"`
@@ -145,6 +149,7 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		Email:                    store.Email,
 		Address:                  store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              store.PhoneNumber,
 		Schedules:                scheduleResponses,
 		CreatedAt:                store.CreatedAt,
 		UpdatedAt:                store.UpdatedAt,
@@ -210,7 +215,7 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 		allowSameDayAppointments = *req.AllowSameDayAppointments
 	}
 
-	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments, req.Email, req.Address, allowSameDayAppointments)
+	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments, req.Email, req.Address, allowSameDayAppointments, req.PhoneNumber)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -320,7 +325,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil && req.Email == nil && req.Address == nil && req.AllowSameDayAppointments == nil {
+	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil && req.Email == nil && req.Address == nil && req.AllowSameDayAppointments == nil && req.PhoneNumber == nil {
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
@@ -338,7 +343,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments, req.Email, req.Address, req.AllowSameDayAppointments)
+	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments, req.Email, req.Address, req.AllowSameDayAppointments, req.PhoneNumber)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

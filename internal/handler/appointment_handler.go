@@ -38,12 +38,13 @@ type createAppointmentRequest struct {
 
 // appointmentResponse struct
 type appointmentResponse struct {
-	ID        string    `json:"id"`
-	StoreID   string    `json:"store_id"`
-	UserID    string    `json:"user_id"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Status    string    `json:"status"`
+	ID                 string    `json:"id"`
+	StoreID            string    `json:"store_id"`
+	UserID             string    `json:"user_id"`
+	StartTime          time.Time `json:"start_time"`
+	EndTime            time.Time `json:"end_time"`
+	Status             string    `json:"status"`
+	CancellationReason string    `json:"cancellation_reason,omitempty"`
 }
 
 // Create method
@@ -172,14 +173,15 @@ func (handler *AppointmentHandler) GetAvailableSlots(writer http.ResponseWriter,
 
 // bookedAppointmentResponse struct
 type bookedAppointmentResponse struct {
-	ID              string    `json:"id"`
-	StartTime       time.Time `json:"start_time"`
-	EndTime         time.Time `json:"end_time"`
-	Status          string    `json:"status"`
-	ClientUsername  string    `json:"client_username"`
-	ClientEmail     string    `json:"client_email"`
-	ClientFirstName string    `json:"client_first_name"`
-	ClientLastName  string    `json:"client_last_name"`
+	ID                 string    `json:"id"`
+	StartTime          time.Time `json:"start_time"`
+	EndTime            time.Time `json:"end_time"`
+	Status             string    `json:"status"`
+	CancellationReason string    `json:"cancellation_reason,omitempty"`
+	ClientUsername     string    `json:"client_username"`
+	ClientEmail        string    `json:"client_email"`
+	ClientFirstName    string    `json:"client_first_name"`
+	ClientLastName     string    `json:"client_last_name"`
 }
 
 // GetBookedAppointments endpoint (e.g., GET /stores/{storeId}/appointments)
@@ -209,14 +211,15 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 	response := make([]bookedAppointmentResponse, 0, len(appointments))
 	for _, appointment := range appointments {
 		response = append(response, bookedAppointmentResponse{
-			ID:              appointment.ID,
-			StartTime:       appointment.StartTime,
-			EndTime:         appointment.EndTime,
-			Status:          appointment.Status,
-			ClientUsername:  appointment.ClientUsername,
-			ClientEmail:     appointment.ClientEmail,
-			ClientFirstName: appointment.ClientFirstName,
-			ClientLastName:  appointment.ClientLastName,
+			ID:                 appointment.ID,
+			StartTime:          appointment.StartTime,
+			EndTime:            appointment.EndTime,
+			Status:             appointment.Status,
+			CancellationReason: appointment.CancellationReason,
+			ClientUsername:     appointment.ClientUsername,
+			ClientEmail:        appointment.ClientEmail,
+			ClientFirstName:    appointment.ClientFirstName,
+			ClientLastName:     appointment.ClientLastName,
 		})
 	}
 
@@ -234,6 +237,14 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 // updateAppointmentStatusRequest struct
 type updateAppointmentStatusRequest struct {
 	Status string `json:"status" validate:"required,oneof=confirmed cancelled"`
+	// Reason is required when rejecting (Status == cancelled), ignored when confirming.
+	Reason string `json:"reason" validate:"required_if=Status cancelled"`
+}
+
+// cancelAppointmentRequest struct
+type cancelAppointmentRequest struct {
+	// Reason is required so every cancellation is auditable.
+	Reason string `json:"reason" validate:"required"`
 }
 
 // myAppointmentResponse struct
@@ -334,19 +345,20 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 		return
 	}
 
-	appointment, err := handler.usecase.UpdateStatus(request.Context(), id, middlewares.GetUserID(request), req.Status)
+	appointment, err := handler.usecase.UpdateStatus(request.Context(), id, middlewares.GetUserID(request), req.Status, req.Reason)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
-		ID:        appointment.ID,
-		StoreID:   appointment.StoreID,
-		UserID:    appointment.UserID,
-		StartTime: appointment.StartTime,
-		EndTime:   appointment.EndTime,
-		Status:    appointment.Status,
+		ID:                 appointment.ID,
+		StoreID:            appointment.StoreID,
+		UserID:             appointment.UserID,
+		StartTime:          appointment.StartTime,
+		EndTime:            appointment.EndTime,
+		Status:             appointment.Status,
+		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
@@ -361,10 +373,11 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 // Cancel endpoint (e.g., PATCH /appointments/{id}/cancel)
 //
 // @Summary Cancel an appointment
-// @Description Moves a pending or confirmed appointment to cancelled. Either the client who booked it or the store's owner may call this.
+// @Description Moves a pending or confirmed appointment to cancelled. Either the client who booked it or the store's owner may call this. Requires a cancellation reason.
 // @Tags appointments
 // @Produce json
 // @Param id path string true "Appointment ID"
+// @Param request body cancelAppointmentRequest true "Cancellation reason"
 // @Success 200 {object} appointmentResponse
 // @Failure 400 {object} ProblemDetails
 // @Failure 403 {object} ProblemDetails
@@ -372,19 +385,54 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 func (handler *AppointmentHandler) Cancel(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("id")
 
-	appointment, err := handler.usecase.Cancel(request.Context(), id, middlewares.GetUserID(request))
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req cancelAppointmentRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrs := handler.validator.Validate(req); validationErrs != nil {
+		err := &ValidationErrorContext{
+			Err:     domain.ErrInvalidInput,
+			Details: validationErrs,
+		}
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	appointment, err := handler.usecase.Cancel(request.Context(), id, middlewares.GetUserID(request), req.Reason)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
-		ID:        appointment.ID,
-		StoreID:   appointment.StoreID,
-		UserID:    appointment.UserID,
-		StartTime: appointment.StartTime,
-		EndTime:   appointment.EndTime,
-		Status:    appointment.Status,
+		ID:                 appointment.ID,
+		StoreID:            appointment.StoreID,
+		UserID:             appointment.UserID,
+		StartTime:          appointment.StartTime,
+		EndTime:            appointment.EndTime,
+		Status:             appointment.Status,
+		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
