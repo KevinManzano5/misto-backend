@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
@@ -14,9 +15,11 @@ type AppointmentRepository interface {
 	// CreateAppointment atomically checks for a scheduling conflict and inserts the appointment.
 	CreateAppointment(ctx context.Context, appointment *domain.Appointment) error
 	ListAppointmentsByStoreDate(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error)
-	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string) ([]*domain.AppointmentWithClient, error)
+	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string, startTime, endTime *time.Time) ([]*domain.AppointmentWithClient, error)
+	ListAppointmentsByClient(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
-	UpdateAppointmentStatus(ctx context.Context, id, status string) (*domain.Appointment, error)
+	UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
+	ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
 }
 
 // StoreScheduleRepository interface (Added for checking availability)
@@ -66,6 +69,10 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID s
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if !store.AllowSameDayAppointments && isSameLocalDay(startTime, time.Now(), storeLocation(store)) {
+		return nil, fmt.Errorf("%w: this store does not accept same-day appointments", domain.ErrInvalidInput)
 	}
 
 	endTime := startTime.Add(time.Duration(store.AppointmentDuration) * time.Minute)
@@ -125,6 +132,12 @@ func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Conte
 	return nil
 }
 
+// isSameLocalDay reports whether a and b fall on the same calendar day in loc.
+func isSameLocalDay(a, b time.Time, loc *time.Location) bool {
+	a, b = a.In(loc), b.In(loc)
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
+}
+
 // parseScheduleClockTime combines a "HH:MM" or "HH:MM:SS" clock string (as stored on a
 // StoreSchedule) with the date portion of date, in date's location.
 func parseScheduleClockTime(date time.Time, clock string) (time.Time, error) {
@@ -179,6 +192,17 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	targetDate, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
 		return nil, domain.ErrInvalidInput
+	}
+
+	now := time.Now()
+	today := now.In(loc)
+	todayDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
+	if targetDate.Before(todayDate) {
+		return nil, fmt.Errorf("%w: cannot get availability for a past date", domain.ErrInvalidInput)
+	}
+
+	if !store.AllowSameDayAppointments && isSameLocalDay(targetDate, now, loc) {
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
 	}
 
 	dayOfWeek := int32(targetDate.Weekday())
@@ -279,7 +303,11 @@ func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeI
 // GetBookedAppointments returns every appointment ever booked at storeID, any status, each
 // paired with the basic profile of the client who booked it. Only the store's owner
 // (requesterUserID) may see this: anyone else gets domain.ErrForbidden.
-func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, storeID, requesterUserID string) ([]*domain.AppointmentWithClient, error) {
+//
+// startDateStr/endDateStr are optional "YYYY-MM-DD" dates, interpreted as a day boundary in the
+// store's own timezone, that restrict results to appointments starting within that inclusive
+// range; an empty string leaves that side of the range open.
+func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, storeID, requesterUserID, startDateStr, endDateStr string) ([]*domain.AppointmentWithClient, error) {
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
@@ -289,7 +317,12 @@ func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, st
 		return nil, fmt.Errorf("%w: only the store owner can view its booked appointments", domain.ErrForbidden)
 	}
 
-	appointments, err := usecase.repo.ListAllAppointmentsByStoreWithClient(ctx, storeID)
+	startTime, endTime, err := parseBookedAppointmentsDateRange(storeLocation(store), startDateStr, endDateStr)
+	if err != nil {
+		return nil, err
+	}
+
+	appointments, err := usecase.repo.ListAllAppointmentsByStoreWithClient(ctx, storeID, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("listing booked appointments: %w", err)
 	}
@@ -297,13 +330,94 @@ func (usecase *AppointmentUseCase) GetBookedAppointments(ctx context.Context, st
 	return appointments, nil
 }
 
+// parseBookedAppointmentsDateRange parses the optional "YYYY-MM-DD" start/end query dates for
+// GetBookedAppointments in loc, expanding each to the start/end instant of that calendar day so
+// the range covers the whole day. Either string may be empty to leave that side of the range
+// open; a nil *time.Time result means "no bound".
+func parseBookedAppointmentsDateRange(loc *time.Location, startDateStr, endDateStr string) (startTime, endTime *time.Time, err error) {
+	if startDateStr != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", startDateStr, loc)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: invalid start_date, expected YYYY-MM-DD", domain.ErrInvalidInput)
+		}
+		startTime = &parsed
+	}
+
+	if endDateStr != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", endDateStr, loc)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: invalid end_date, expected YYYY-MM-DD", domain.ErrInvalidInput)
+		}
+		endOfDay := parsed.Add(24 * time.Hour).Add(-time.Nanosecond)
+		endTime = &endOfDay
+	}
+
+	if startTime != nil && endTime != nil && endTime.Before(*startTime) {
+		return nil, nil, fmt.Errorf("%w: end_date must not be before start_date", domain.ErrInvalidInput)
+	}
+
+	return startTime, endTime, nil
+}
+
+// ListMyAppointments returns every appointment ever booked by userID, any status, most recent
+// first, each paired with the basic info of the store it was booked at.
+func (usecase *AppointmentUseCase) ListMyAppointments(ctx context.Context, userID string) ([]*domain.AppointmentWithStore, error) {
+	appointments, err := usecase.repo.ListAppointmentsByClient(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing appointments by client: %w", err)
+	}
+
+	return appointments, nil
+}
+
+// Cancel moves a pending or confirmed appointment to cancelled. Either the client who booked it
+// (requesterUserID matches the appointment's UserID) or the store's owner may cancel it; anyone
+// else gets domain.ErrForbidden. An appointment that is already cancelled/completed/expired is
+// rejected with domain.ErrInvalidInput since there's nothing left to cancel. A non-empty reason
+// is required so cancellations are always auditable.
+func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, requesterUserID, reason string) (*domain.Appointment, error) {
+	if strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("%w: a cancellation reason is required", domain.ErrInvalidInput)
+	}
+
+	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("getting appointment: %w", err)
+	}
+
+	store, err := usecase.storeRepo.GetStoreByID(ctx, appointment.StoreID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if requesterUserID != appointment.UserID && requesterUserID != store.UserID {
+		return nil, fmt.Errorf("%w: only the client who booked it or the store owner can cancel this appointment", domain.ErrForbidden)
+	}
+
+	if appointment.Status != domain.AppointmentStatusPending && appointment.Status != domain.AppointmentStatusConfirmed {
+		return nil, fmt.Errorf("%w: only a pending or confirmed appointment can be cancelled", domain.ErrInvalidInput)
+	}
+
+	cancelled, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, domain.AppointmentStatusCancelled, reason)
+	if err != nil {
+		return nil, fmt.Errorf("cancelling appointment: %w", err)
+	}
+
+	return cancelled, nil
+}
+
 // UpdateStatus moves a pending appointment to confirmed (approved) or cancelled (rejected).
 // Only the store's owner (requesterUserID) may do this, and only while the appointment is still
 // pending: anyone else gets domain.ErrForbidden, and any other starting status is rejected with
-// domain.ErrInvalidInput since it's no longer awaiting a decision.
-func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus string) (*domain.Appointment, error) {
+// domain.ErrInvalidInput since it's no longer awaiting a decision. Rejecting (newStatus ==
+// cancelled) requires a non-empty reason, auditable like any other cancellation.
+func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointmentID, requesterUserID, newStatus, reason string) (*domain.Appointment, error) {
 	if newStatus != domain.AppointmentStatusConfirmed && newStatus != domain.AppointmentStatusCancelled {
 		return nil, fmt.Errorf("%w: status must be %q or %q", domain.ErrInvalidInput, domain.AppointmentStatusConfirmed, domain.AppointmentStatusCancelled)
+	}
+
+	if newStatus == domain.AppointmentStatusCancelled && strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("%w: a cancellation reason is required", domain.ErrInvalidInput)
 	}
 
 	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
@@ -324,10 +438,23 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 		return nil, fmt.Errorf("%w: appointment is not pending approval", domain.ErrInvalidInput)
 	}
 
-	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus)
+	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus, reason)
 	if err != nil {
 		return nil, fmt.Errorf("updating appointment status: %w", err)
 	}
 
 	return updated, nil
+}
+
+// ExpireOverdueAppointments moves pending/confirmed appointments whose end_time has already
+// passed to a terminal status (completed/expired) and returns how many were changed. It is a
+// system action with no requester to authorize against, meant to be called by a periodic job
+// rather than from an HTTP handler.
+func (usecase *AppointmentUseCase) ExpireOverdueAppointments(ctx context.Context) (int, error) {
+	expired, err := usecase.repo.ExpireOverdueAppointments(ctx, time.Now())
+	if err != nil {
+		return 0, fmt.Errorf("expiring overdue appointments: %w", err)
+	}
+
+	return len(expired), nil
 }

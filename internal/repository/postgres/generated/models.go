@@ -9,28 +9,33 @@ import (
 )
 
 type Appointment struct {
-	ID        pgtype.UUID        `json:"id"`
-	StoreID   pgtype.UUID        `json:"store_id"`
-	ClientID  pgtype.UUID        `json:"client_id"`
-	StartTime pgtype.Timestamptz `json:"start_time"`
-	EndTime   pgtype.Timestamptz `json:"end_time"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	ClientID           pgtype.UUID        `json:"client_id"`
+	StartTime          pgtype.Timestamptz `json:"start_time"`
+	EndTime            pgtype.Timestamptz `json:"end_time"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CancellationReason *string            `json:"cancellation_reason"`
 }
 
 type Store struct {
-	ID                      pgtype.UUID        `json:"id"`
-	UserID                  pgtype.UUID        `json:"user_id"`
-	Name                    string             `json:"name"`
-	Description             *string            `json:"description"`
-	IsActive                bool               `json:"is_active"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `json:"deleted_at"`
-	AppointmentDuration     int32              `json:"appointment_duration"`
-	Timezone                string             `json:"timezone"`
-	AutoConfirmAppointments bool               `json:"auto_confirm_appointments"`
+	ID                       pgtype.UUID        `json:"id"`
+	UserID                   pgtype.UUID        `json:"user_id"`
+	Name                     string             `json:"name"`
+	Description              *string            `json:"description"`
+	IsActive                 bool               `json:"is_active"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	AppointmentDuration      int32              `json:"appointment_duration"`
+	Timezone                 string             `json:"timezone"`
+	AutoConfirmAppointments  bool               `json:"auto_confirm_appointments"`
+	Email                    *string            `json:"email"`
+	Address                  *string            `json:"address"`
+	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
+	PhoneNumber              *string            `json:"phone_number"`
 }
 
 type StoreSchedule struct {

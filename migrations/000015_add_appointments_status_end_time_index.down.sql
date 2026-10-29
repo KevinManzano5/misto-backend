@@ -1,0 +1,1 @@
+DROP INDEX idx_appointments_status_end_time;

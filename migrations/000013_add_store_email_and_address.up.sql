@@ -1,0 +1,2 @@
+ALTER TABLE stores ADD COLUMN email VARCHAR(255);
+ALTER TABLE stores ADD COLUMN address TEXT;

@@ -37,34 +37,51 @@ type createStoreRequest struct {
 	Name                string `json:"name" validate:"required,min=2,max=30"`
 	Description         string `json:"description" validate:"required"`
 	AppointmentDuration int32  `json:"appointment_duration" validate:"omitempty,min=1"`
-	// Timezone is the store's IANA timezone (e.g. "America/Bogota"). Defaults to "UTC" when omitted.
+	// Timezone is the store's IANA timezone (e.g. "America/Bogota"). Defaults to "America/Bogota" when omitted.
 	Timezone string `json:"timezone" validate:"omitempty"`
 	// AutoConfirmAppointments controls whether new appointments are confirmed immediately or
 	// left pending for the owner to approve/reject. Defaults to true (auto-confirm) when omitted.
 	AutoConfirmAppointments *bool `json:"auto_confirm_appointments"`
+	// Email is the store's contact email address.
+	Email string `json:"email" validate:"omitempty,email"`
+	// Address is the store's physical address.
+	Address string `json:"address" validate:"omitempty"`
+	// AllowSameDayAppointments controls whether a client can book an appointment on the same
+	// calendar day it is requested. Defaults to true (allowed) when omitted.
+	AllowSameDayAppointments *bool `json:"allow_same_day_appointments"`
+	// PhoneNumber is the store's contact phone number, in E.164 format (e.g. "+573001234567").
+	PhoneNumber string `json:"phone_number" validate:"omitempty,e164"`
 }
 
 type updateStoreRequest struct {
-	Name                    *string `json:"name" validate:"omitempty,min=2,max=30"`
-	Description             *string `json:"description"`
-	IsActive                *bool   `json:"is_active"`
-	AppointmentDuration     *int32  `json:"appointment_duration" validate:"omitempty,min=1"`
-	Timezone                *string `json:"timezone" validate:"omitempty"`
-	AutoConfirmAppointments *bool   `json:"auto_confirm_appointments"`
+	Name                     *string `json:"name" validate:"omitempty,min=2,max=30"`
+	Description              *string `json:"description"`
+	IsActive                 *bool   `json:"is_active"`
+	AppointmentDuration      *int32  `json:"appointment_duration" validate:"omitempty,min=1"`
+	Timezone                 *string `json:"timezone" validate:"omitempty"`
+	AutoConfirmAppointments  *bool   `json:"auto_confirm_appointments"`
+	Email                    *string `json:"email" validate:"omitempty,email"`
+	Address                  *string `json:"address"`
+	AllowSameDayAppointments *bool   `json:"allow_same_day_appointments"`
+	PhoneNumber              *string `json:"phone_number" validate:"omitempty,e164"`
 }
 
 type storeResponse struct {
-	ID                      string                  `json:"id"`
-	UserID                  string                  `json:"user_id"`
-	Name                    string                  `json:"name"`
-	Description             string                  `json:"description"`
-	IsActive                bool                    `json:"is_active"`
-	AppointmentDuration     int32                   `json:"appointment_duration"`
-	Timezone                string                  `json:"timezone"`
-	AutoConfirmAppointments bool                    `json:"auto_confirm_appointments"`
-	Schedules               []storeScheduleResponse `json:"schedules"`
-	CreatedAt               time.Time               `json:"created_at"`
-	UpdatedAt               time.Time               `json:"updated_at"`
+	ID                       string                  `json:"id"`
+	UserID                   string                  `json:"user_id"`
+	Name                     string                  `json:"name"`
+	Description              string                  `json:"description"`
+	IsActive                 bool                    `json:"is_active"`
+	AppointmentDuration      int32                   `json:"appointment_duration"`
+	Timezone                 string                  `json:"timezone"`
+	AutoConfirmAppointments  bool                    `json:"auto_confirm_appointments"`
+	Email                    string                  `json:"email"`
+	Address                  string                  `json:"address"`
+	AllowSameDayAppointments bool                    `json:"allow_same_day_appointments"`
+	PhoneNumber              string                  `json:"phone_number"`
+	Schedules                []storeScheduleResponse `json:"schedules"`
+	CreatedAt                time.Time               `json:"created_at"`
+	UpdatedAt                time.Time               `json:"updated_at"`
 }
 
 type upsertStoreScheduleRequest struct {
@@ -121,17 +138,21 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 	}
 
 	return storeResponse{
-		ID:                      store.ID,
-		UserID:                  store.UserID,
-		Name:                    store.Name,
-		Description:             store.Description,
-		IsActive:                store.IsActive,
-		AppointmentDuration:     store.AppointmentDuration,
-		Timezone:                store.Timezone,
-		AutoConfirmAppointments: store.AutoConfirmAppointments,
-		Schedules:               scheduleResponses,
-		CreatedAt:               store.CreatedAt,
-		UpdatedAt:               store.UpdatedAt,
+		ID:                       store.ID,
+		UserID:                   store.UserID,
+		Name:                     store.Name,
+		Description:              store.Description,
+		IsActive:                 store.IsActive,
+		AppointmentDuration:      store.AppointmentDuration,
+		Timezone:                 store.Timezone,
+		AutoConfirmAppointments:  store.AutoConfirmAppointments,
+		Email:                    store.Email,
+		Address:                  store.Address,
+		AllowSameDayAppointments: store.AllowSameDayAppointments,
+		PhoneNumber:              store.PhoneNumber,
+		Schedules:                scheduleResponses,
+		CreatedAt:                store.CreatedAt,
+		UpdatedAt:                store.UpdatedAt,
 	}, nil
 }
 
@@ -189,7 +210,12 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 		autoConfirmAppointments = *req.AutoConfirmAppointments
 	}
 
-	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments)
+	allowSameDayAppointments := true
+	if req.AllowSameDayAppointments != nil {
+		allowSameDayAppointments = *req.AllowSameDayAppointments
+	}
+
+	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments, req.Email, req.Address, allowSameDayAppointments, req.PhoneNumber)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -299,7 +325,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil {
+	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil && req.Email == nil && req.Address == nil && req.AllowSameDayAppointments == nil && req.PhoneNumber == nil {
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
@@ -317,7 +343,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments)
+	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments, req.Email, req.Address, req.AllowSameDayAppointments, req.PhoneNumber)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

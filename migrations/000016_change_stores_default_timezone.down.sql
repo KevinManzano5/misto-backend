@@ -1,0 +1,1 @@
+ALTER TABLE stores ALTER COLUMN timezone SET DEFAULT 'UTC';

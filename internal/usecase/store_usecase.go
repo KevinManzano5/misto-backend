@@ -22,7 +22,7 @@ const sunday = 0
 const defaultAppointmentDuration = 30
 
 // defaultTimezone is applied to a store when it is created without one.
-const defaultTimezone = "UTC"
+const defaultTimezone = "America/Bogota"
 
 // validateTimezone checks that name is a loadable IANA timezone (e.g. "America/Bogota").
 func validateTimezone(name string) error {
@@ -66,7 +66,7 @@ func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *Sto
 
 // Create method creates a store along with a default weekly schedule (open every day
 // 09:00-18:00, except Sunday which is closed), which the owner can later customize.
-func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool) (*domain.Store, error) {
+func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string) (*domain.Store, error) {
 	if appointmentDuration <= 0 {
 		appointmentDuration = defaultAppointmentDuration
 	}
@@ -77,7 +77,7 @@ func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, descripti
 		return nil, err
 	}
 
-	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone, autoConfirmAppointments)
+	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber)
 	schedules := defaultWeeklySchedules()
 
 	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
@@ -134,7 +134,7 @@ func (usecase *StoreUseCase) List(ctx context.Context) ([]*domain.Store, error) 
 }
 
 // Update method applies the supplied changes to a store and returns the persisted store.
-func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string, autoConfirmAppointments *bool) (*domain.Store, error) {
+func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string, autoConfirmAppointments *bool, email, address *string, allowSameDayAppointments *bool, phoneNumber *string) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store to update: %w", err)
@@ -160,6 +160,18 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	}
 	if autoConfirmAppointments != nil {
 		store.AutoConfirmAppointments = *autoConfirmAppointments
+	}
+	if email != nil {
+		store.Email = *email
+	}
+	if address != nil {
+		store.Address = *address
+	}
+	if allowSameDayAppointments != nil {
+		store.AllowSameDayAppointments = *allowSameDayAppointments
+	}
+	if phoneNumber != nil {
+		store.PhoneNumber = *phoneNumber
 	}
 
 	if !store.IsValid() {

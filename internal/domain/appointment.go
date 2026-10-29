@@ -8,6 +8,7 @@ const (
 	AppointmentStatusConfirmed = "confirmed"
 	AppointmentStatusCancelled = "cancelled"
 	AppointmentStatusCompleted = "completed"
+	AppointmentStatusExpired   = "expired"
 )
 
 // Appointment struct
@@ -18,8 +19,10 @@ type Appointment struct {
 	StartTime time.Time
 	EndTime   time.Time
 	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// CancellationReason is the reason given when the appointment was cancelled, empty otherwise.
+	CancellationReason string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // AppointmentWithClient pairs an appointment with the basic profile of the client who booked it,
@@ -30,6 +33,13 @@ type AppointmentWithClient struct {
 	ClientEmail     string
 	ClientFirstName string
 	ClientLastName  string
+}
+
+// AppointmentWithStore pairs an appointment with the basic info of the store it was booked at,
+// for a client's own "my appointments" view.
+type AppointmentWithStore struct {
+	Appointment
+	StoreName string
 }
 
 // NewAppointment constructor

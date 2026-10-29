@@ -35,8 +35,9 @@ WHERE store_id = $1
 ORDER BY start_time ASC;
 
 -- name: ListAllAppointmentsByStoreWithClient :many
--- Every appointment ever booked at a store, any status, along with the client's basic profile,
--- for the owner's full history view.
+-- Every appointment ever booked at a store, any status, optionally restricted to an inclusive
+-- start_time range, along with the client's basic profile, for the owner's history view. Either
+-- bound may be NULL to leave that side of the range open.
 SELECT
     a.id,
     a.store_id,
@@ -44,6 +45,7 @@ SELECT
     a.start_time,
     a.end_time,
     a.status,
+    a.cancellation_reason,
     a.created_at,
     a.updated_at,
     u.username AS client_username,
@@ -53,6 +55,8 @@ SELECT
 FROM appointments a
 JOIN users u ON u.id = a.client_id
 WHERE a.store_id = $1
+  AND (sqlc.narg(start_date)::timestamptz IS NULL OR a.start_time >= sqlc.narg(start_date))
+  AND (sqlc.narg(end_date)::timestamptz IS NULL OR a.start_time <= sqlc.narg(end_date))
 ORDER BY a.start_time DESC;
 
 -- name: GetAppointmentByID :one
@@ -64,6 +68,40 @@ LIMIT 1;
 UPDATE appointments
 SET
     status = $2,
+    cancellation_reason = sqlc.narg(cancellation_reason),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
+RETURNING *;
+
+-- name: ListAppointmentsByClient :many
+-- Every appointment ever booked by a client, any status, most recent first, along with the
+-- basic info of the store it was booked at, for the client's own "my appointments" view.
+SELECT
+    a.id,
+    a.store_id,
+    a.client_id,
+    a.start_time,
+    a.end_time,
+    a.status,
+    a.created_at,
+    a.updated_at,
+    s.name AS store_name
+FROM appointments a
+JOIN stores s ON s.id = a.store_id
+WHERE a.client_id = $1
+ORDER BY a.start_time DESC;
+
+-- name: ExpireOverdueAppointments :many
+-- Moves pending/confirmed appointments whose end_time has already passed to a terminal status:
+-- confirmed appointments are assumed to have happened (completed), pending ones were never
+-- reviewed in time by the store (expired).
+UPDATE appointments
+SET
+    status = CASE status
+        WHEN 'confirmed' THEN 'completed'
+        WHEN 'pending' THEN 'expired'
+    END,
+    updated_at = CURRENT_TIMESTAMP
+WHERE status IN ('pending', 'confirmed')
+  AND end_time < sqlc.arg(before)
 RETURNING *;
