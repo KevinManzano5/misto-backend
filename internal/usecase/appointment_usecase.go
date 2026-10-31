@@ -19,6 +19,7 @@ type AppointmentRepository interface {
 	ListAllAppointmentsByStoreWithClient(ctx context.Context, storeID string, startTime, endTime *time.Time) ([]*domain.AppointmentWithClient, error)
 	ListAppointmentsByClient(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
+	GetActiveAppointmentByStoreAndClient(ctx context.Context, storeID, clientID string) (*domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
 	UpdatePaymentStatus(ctx context.Context, id, paymentStatus string) (*domain.Appointment, error)
 	ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
@@ -475,6 +476,20 @@ func (usecase *AppointmentUseCase) ListMyAppointments(ctx context.Context, userI
 	}
 
 	return appointments, nil
+}
+
+// GetActiveAppointmentStatus reports whether userID currently has a pending/confirmed
+// appointment at storeID. It returns (nil, nil) when none exists — an expected outcome, not an
+// error. No authorization check beyond "userID is the authenticated caller" is needed: userID
+// always comes from middlewares.GetUserID, never a path/query parameter, so unlike
+// GetBookedAppointments/Cancel there is no "someone else's identity" to guard against.
+func (usecase *AppointmentUseCase) GetActiveAppointmentStatus(ctx context.Context, storeID, userID string) (*domain.Appointment, error) {
+	appointment, err := usecase.repo.GetActiveAppointmentByStoreAndClient(ctx, storeID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("getting active appointment status: %w", err)
+	}
+
+	return appointment, nil
 }
 
 // Cancel moves a pending or confirmed appointment to cancelled. Either the client who booked it

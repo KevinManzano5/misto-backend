@@ -87,6 +87,7 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 	srv.RegisterRoutes("POST /api/v1/appointments", withAuth(appointment.Create))
 	srv.RegisterRoutes("GET /api/v1/appointments", withAuth(appointment.GetMyAppointments))
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments", withAuth(appointment.GetBookedAppointments))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments/me", withAuth(appointment.GetActiveAppointmentStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/status", withAuth(appointment.UpdateStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/cancel", withAuth(appointment.Cancel))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/confirm-cash-payment", withAuth(appointment.ConfirmCashPayment))

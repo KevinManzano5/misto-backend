@@ -295,6 +295,34 @@ func (repo *AppointmentRepository) GetAppointmentByID(ctx context.Context, id st
 	return toDomainAppointment(result), nil
 }
 
+// GetActiveAppointmentByStoreAndClient returns the client's pending/confirmed appointment at
+// storeID, if any. A nil, nil result (not domain.ErrNotFound) means no active appointment exists
+// there — an expected, valid outcome for this lookup, not a failure to find a resource assumed
+// to exist.
+func (repo *AppointmentRepository) GetActiveAppointmentByStoreAndClient(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) {
+	var sID, cID pgtype.UUID
+
+	if err := sID.Scan(storeID); err != nil {
+		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+	if err := cID.Scan(clientID); err != nil {
+		return nil, fmt.Errorf("invalid clientID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.GetActiveAppointmentByStoreAndClient(ctx, postgres.GetActiveAppointmentByStoreAndClientParams{
+		StoreID:  sID,
+		ClientID: cID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting active appointment for store %s and client %s: %w", storeID, clientID, err)
+	}
+
+	return toDomainAppointment(result), nil
+}
+
 // ExpireOverdueAppointments moves pending/confirmed appointments whose end_time is before
 // `before` to a terminal status (completed/expired) in a single bulk update, and returns the
 // rows that were changed.

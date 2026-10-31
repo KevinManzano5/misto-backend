@@ -13,6 +13,15 @@ WHERE store_id = sqlc.arg(store_id)
   AND client_id = sqlc.arg(client_id)
   AND status IN ('pending', 'confirmed');
 
+-- name: GetActiveAppointmentByStoreAndClient :one
+-- Returns the client's pending/confirmed appointment at this store, if any. Zero rows is a
+-- normal, expected outcome here (no active appointment), not a not-found error.
+SELECT * FROM appointments
+WHERE store_id = sqlc.arg(store_id)
+  AND client_id = sqlc.arg(client_id)
+  AND status IN ('pending', 'confirmed')
+LIMIT 1;
+
 -- name: CreateAppointment :one
 INSERT INTO appointments (
     store_id,

@@ -309,6 +309,64 @@ func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter,
 	}
 }
 
+// activeAppointmentInfo struct
+type activeAppointmentInfo struct {
+	ID            string    `json:"id"`
+	Status        string    `json:"status"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	PaymentMethod string    `json:"payment_method"`
+	PaymentStatus string    `json:"payment_status"`
+}
+
+// activeAppointmentStatusResponse struct
+type activeAppointmentStatusResponse struct {
+	HasAppointment bool                   `json:"has_appointment"`
+	Appointment    *activeAppointmentInfo `json:"appointment"`
+}
+
+// GetActiveAppointmentStatus endpoint (e.g., GET /stores/{storeId}/appointments/me)
+//
+// @Summary Check whether the authenticated user has an active appointment at a store
+// @Description Reports whether the authenticated user currently has a pending or confirmed appointment at the given store, along with its basic data (including payment method/status) if one exists.
+// @Tags appointments
+// @Produce json
+// @Param storeId path string true "Store ID"
+// @Success 200 {object} activeAppointmentStatusResponse
+// @Failure 400 {object} ProblemDetails
+// @Router /stores/{storeId}/appointments/me [get]
+func (handler *AppointmentHandler) GetActiveAppointmentStatus(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	appointment, err := handler.usecase.GetActiveAppointmentStatus(request.Context(), storeID, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := activeAppointmentStatusResponse{HasAppointment: appointment != nil}
+	if appointment != nil {
+		response.Appointment = &activeAppointmentInfo{
+			ID:            appointment.ID,
+			Status:        appointment.Status,
+			StartTime:     appointment.StartTime,
+			EndTime:       appointment.EndTime,
+			PaymentMethod: appointment.PaymentMethod,
+			PaymentStatus: appointment.PaymentStatus,
+		}
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
 // UpdateStatus endpoint (e.g., PATCH /appointments/{id}/status)
 //
 // @Summary Approve or reject a pending appointment

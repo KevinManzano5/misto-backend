@@ -155,6 +155,40 @@ func (q *Queries) ExpireOverdueAppointments(ctx context.Context, before pgtype.T
 	return items, nil
 }
 
+const getActiveAppointmentByStoreAndClient = `-- name: GetActiveAppointmentByStoreAndClient :one
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status FROM appointments
+WHERE store_id = $1
+  AND client_id = $2
+  AND status IN ('pending', 'confirmed')
+LIMIT 1
+`
+
+type GetActiveAppointmentByStoreAndClientParams struct {
+	StoreID  pgtype.UUID `json:"store_id"`
+	ClientID pgtype.UUID `json:"client_id"`
+}
+
+// Returns the client's pending/confirmed appointment at this store, if any. Zero rows is a
+// normal, expected outcome here (no active appointment), not a not-found error.
+func (q *Queries) GetActiveAppointmentByStoreAndClient(ctx context.Context, arg GetActiveAppointmentByStoreAndClientParams) (Appointment, error) {
+	row := q.db.QueryRow(ctx, getActiveAppointmentByStoreAndClient, arg.StoreID, arg.ClientID)
+	var i Appointment
+	err := row.Scan(
+		&i.ID,
+		&i.StoreID,
+		&i.ClientID,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CancellationReason,
+		&i.PaymentMethod,
+		&i.PaymentStatus,
+	)
+	return i, err
+}
+
 const getAppointmentByID = `-- name: GetAppointmentByID :one
 SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status FROM appointments
 WHERE id = $1

@@ -19,12 +19,13 @@ func discardLogger() *slog.Logger {
 // fakeAppointmentRepository is a minimal AppointmentRepository test double; only the methods
 // exercised by a given test need a non-nil func field.
 type fakeAppointmentRepository struct {
-	createAppointmentFunc         func(ctx context.Context, appointment *domain.Appointment) error
-	expireOverdueAppointmentsFunc func(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
-	getAppointmentByIDFunc        func(ctx context.Context, id string) (*domain.Appointment, error)
-	updateAppointmentStatusFunc   func(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
-	updatePaymentStatusFunc       func(ctx context.Context, id, paymentStatus string) (*domain.Appointment, error)
-	listAppointmentsByClientFunc  func(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
+	createAppointmentFunc                    func(ctx context.Context, appointment *domain.Appointment) error
+	expireOverdueAppointmentsFunc            func(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
+	getAppointmentByIDFunc                   func(ctx context.Context, id string) (*domain.Appointment, error)
+	getActiveAppointmentByStoreAndClientFunc func(ctx context.Context, storeID, clientID string) (*domain.Appointment, error)
+	updateAppointmentStatusFunc              func(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
+	updatePaymentStatusFunc                  func(ctx context.Context, id, paymentStatus string) (*domain.Appointment, error)
+	listAppointmentsByClientFunc             func(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 }
 
 func (f *fakeAppointmentRepository) CreateAppointment(ctx context.Context, appointment *domain.Appointment) error {
@@ -44,6 +45,10 @@ func (f *fakeAppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx con
 
 func (f *fakeAppointmentRepository) GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error) {
 	return f.getAppointmentByIDFunc(ctx, id)
+}
+
+func (f *fakeAppointmentRepository) GetActiveAppointmentByStoreAndClient(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) {
+	return f.getActiveAppointmentByStoreAndClientFunc(ctx, storeID, clientID)
 }
 
 func (f *fakeAppointmentRepository) UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error) {
@@ -242,6 +247,56 @@ func TestListMyAppointments_WrapsRepositoryError(t *testing.T) {
 	_, err := uc.ListMyAppointments(context.Background(), "client-1")
 	if !errors.Is(err, repoErr) {
 		t.Fatalf("expected error to wrap %v, got %v", repoErr, err)
+	}
+}
+
+func TestGetActiveAppointmentStatus(t *testing.T) {
+	repoErr := errors.New("db unavailable")
+	active := &domain.Appointment{ID: "appt-1", StoreID: "store-1", UserID: "client-1", Status: domain.AppointmentStatusConfirmed}
+
+	tests := []struct {
+		name     string
+		repoFunc func(ctx context.Context, storeID, clientID string) (*domain.Appointment, error)
+		want     *domain.Appointment
+		wantErr  error
+	}{
+		{
+			name:     "an active appointment is returned",
+			repoFunc: func(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) { return active, nil },
+			want:     active,
+		},
+		{
+			name:     "no active appointment returns nil, nil, not an error",
+			repoFunc: func(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) { return nil, nil },
+			want:     nil,
+		},
+		{
+			name:     "a repository error is wrapped and propagated",
+			repoFunc: func(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) { return nil, repoErr },
+			wantErr:  repoErr,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAppointmentRepository{getActiveAppointmentByStoreAndClientFunc: tt.repoFunc}
+			uc := NewAppointmentUseCase(repo, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+			got, err := uc.GetActiveAppointmentStatus(context.Background(), "store-1", "client-1")
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected error to wrap %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("expected %+v, got %+v", tt.want, got)
+			}
+		})
 	}
 }
 
