@@ -386,6 +386,100 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 	}
 }
 
+// ConfirmCashPayment endpoint (e.g., PATCH /appointments/{id}/confirm-cash-payment)
+//
+// @Summary Confirm a cash_on_site payment was received
+// @Description Marks a cash_on_site appointment's payment as paid. Only the store's owner may call this, and only while the payment is pending.
+// @Tags appointments
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Success 200 {object} appointmentResponse
+// @Failure 400 {object} ProblemDetails
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/confirm-cash-payment [patch]
+func (handler *AppointmentHandler) ConfirmCashPayment(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	appointment, err := handler.usecase.ConfirmCashPayment(request.Context(), id, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
+		ID:            appointment.ID,
+		StoreID:       appointment.StoreID,
+		UserID:        appointment.UserID,
+		StartTime:     appointment.StartTime,
+		EndTime:       appointment.EndTime,
+		Status:        appointment.Status,
+		PaymentMethod: appointment.PaymentMethod,
+		PaymentStatus: appointment.PaymentStatus,
+	}); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// paymentTransactionResponse struct
+type paymentTransactionResponse struct {
+	ID            string    `json:"id"`
+	Amount        int64     `json:"amount"`
+	Currency      string    `json:"currency"`
+	Status        string    `json:"status"`
+	PaymentMethod string    `json:"payment_method"`
+	FailureReason string    `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ListPaymentTransactions endpoint (e.g., GET /appointments/{id}/transactions)
+//
+// @Summary Get an appointment's payment transaction history
+// @Description Lists every charge attempt (successful or failed) for an appointment, most recent first. Only the client who booked it or the store owner may call this.
+// @Tags appointments
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Success 200 {array} paymentTransactionResponse
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/transactions [get]
+func (handler *AppointmentHandler) ListPaymentTransactions(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	transactions, err := handler.usecase.ListPaymentTransactions(request.Context(), id, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]paymentTransactionResponse, 0, len(transactions))
+	for _, transaction := range transactions {
+		response = append(response, paymentTransactionResponse{
+			ID:            transaction.ID,
+			Amount:        transaction.Amount,
+			Currency:      transaction.Currency,
+			Status:        transaction.Status,
+			PaymentMethod: transaction.PaymentMethod,
+			FailureReason: transaction.FailureReason,
+			CreatedAt:     transaction.CreatedAt,
+		})
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
 // Cancel endpoint (e.g., PATCH /appointments/{id}/cancel)
 //
 // @Summary Cancel an appointment

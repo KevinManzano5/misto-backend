@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -38,21 +39,44 @@ type AppointmentStoreRepository interface {
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 }
 
+// PaymentTransactionRepository interface (narrowed to what AppointmentUseCase needs to record and
+// list charge attempts)
+type PaymentTransactionRepository interface {
+	CreatePaymentTransaction(ctx context.Context, transaction *domain.PaymentTransaction) error
+	ListPaymentTransactionsByAppointment(ctx context.Context, appointmentID string) ([]*domain.PaymentTransaction, error)
+}
+
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
-	repo             AppointmentRepository
-	scheduleRepo     StoreScheduleRepository
-	storeRepo        AppointmentStoreRepository
-	paymentProcessor PaymentProcessor
+	repo                   AppointmentRepository
+	scheduleRepo           StoreScheduleRepository
+	storeRepo              AppointmentStoreRepository
+	paymentProcessor       PaymentProcessor
+	paymentTransactionRepo PaymentTransactionRepository
+	log                    *slog.Logger
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, paymentProcessor PaymentProcessor) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
 	return &AppointmentUseCase{
-		repo:             repo,
-		scheduleRepo:     scheduleRepo,
-		storeRepo:        storeRepo,
-		paymentProcessor: paymentProcessor,
+		repo:                   repo,
+		scheduleRepo:           scheduleRepo,
+		storeRepo:              storeRepo,
+		paymentProcessor:       paymentProcessor,
+		paymentTransactionRepo: paymentTransactionRepo,
+		log:                    log,
+	}
+}
+
+// recordPaymentTransaction best-effort-records the outcome of a Charge call as a new, immutable
+// payment_transactions row. A failure here is logged but intentionally does not abort the
+// caller's flow: appointments.payment_status (the source of truth) has already been decided
+// independently of this write, and failing a user's booking/confirmation over an audit-log
+// failure would be worse than a best-effort gap in the history.
+func (usecase *AppointmentUseCase) recordPaymentTransaction(ctx context.Context, appointmentID, paymentMethod, status, failureReason string) {
+	transaction := domain.NewPaymentTransaction(appointmentID, 0, status, paymentMethod, failureReason)
+	if err := usecase.paymentTransactionRepo.CreatePaymentTransaction(ctx, transaction); err != nil {
+		usecase.log.Error("failed to record payment transaction", slog.String("appointment_id", appointmentID), slog.Any("error", err))
 	}
 }
 
@@ -98,17 +122,22 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, 
 		status = domain.AppointmentStatusConfirmed
 	}
 
-	paymentStatus := domain.PaymentStatusNotRequired
-	if paymentMethod == domain.PaymentMethodCardAdvance {
-		paymentStatus = domain.PaymentStatusPending
-	}
+	// Every payment method starts pending: a cash_on_site payment stays pending until the store
+	// owner confirms it was received (see ConfirmCashPayment); a card_advance payment stays
+	// pending until a charge is attempted, immediately below or later at manual confirmation
+	// (see UpdateStatus).
+	paymentStatus := domain.PaymentStatusPending
 
 	appointment := domain.NewAppointment(storeID, userID, status, paymentMethod, paymentStatus, startTime, endTime)
 
 	// Auto-confirming stores charge the card immediately; a store that reviews appointments
 	// manually only charges when it confirms (see UpdateStatus).
+	chargeAttempted := false
+	var chargeErr error
 	if paymentMethod == domain.PaymentMethodCardAdvance && store.AutoConfirmAppointments {
-		if err := usecase.paymentProcessor.Charge(ctx, appointment); err != nil {
+		chargeAttempted = true
+		chargeErr = usecase.paymentProcessor.Charge(ctx, appointment)
+		if chargeErr != nil {
 			appointment.Status = domain.AppointmentStatusPending
 			appointment.PaymentStatus = domain.PaymentStatusFailed
 		} else {
@@ -120,7 +149,57 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, 
 		return nil, fmt.Errorf("creating appointment: %w", err)
 	}
 
+	// Every new appointment gets exactly one initial transaction row, recorded only after the
+	// insert above since it references appointment.ID: the resolved outcome when a charge was
+	// attempted immediately, or a pending placeholder otherwise, that a later action
+	// (ConfirmCashPayment or UpdateStatus) resolves with a new row.
+	transactionStatus, failureReason := domain.PaymentStatusPending, ""
+	if chargeAttempted {
+		transactionStatus = domain.PaymentStatusPaid
+		if chargeErr != nil {
+			transactionStatus, failureReason = domain.PaymentStatusFailed, chargeErr.Error()
+		}
+	}
+	usecase.recordPaymentTransaction(ctx, appointment.ID, paymentMethod, transactionStatus, failureReason)
+
 	return appointment, nil
+}
+
+// ConfirmCashPayment marks a cash_on_site appointment's payment as received. Only the store
+// owner may call this, and only while the payment is still pending: a card_advance appointment,
+// or one already paid/failed, is rejected with domain.ErrInvalidInput since there's nothing to
+// confirm this way.
+func (usecase *AppointmentUseCase) ConfirmCashPayment(ctx context.Context, appointmentID, requesterUserID string) (*domain.Appointment, error) {
+	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("getting appointment: %w", err)
+	}
+
+	store, err := usecase.storeRepo.GetStoreByID(ctx, appointment.StoreID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if store.UserID != requesterUserID {
+		return nil, fmt.Errorf("%w: only the store owner can confirm a cash payment", domain.ErrForbidden)
+	}
+
+	if appointment.PaymentMethod != domain.PaymentMethodCashOnSite {
+		return nil, fmt.Errorf("%w: only a cash_on_site appointment's payment can be confirmed this way", domain.ErrInvalidInput)
+	}
+
+	if appointment.PaymentStatus != domain.PaymentStatusPending {
+		return nil, fmt.Errorf("%w: payment is not pending confirmation", domain.ErrInvalidInput)
+	}
+
+	updated, err := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusPaid)
+	if err != nil {
+		return nil, fmt.Errorf("confirming cash payment: %w", err)
+	}
+
+	usecase.recordPaymentTransaction(ctx, appointmentID, domain.PaymentMethodCashOnSite, domain.PaymentStatusPaid, "")
+
+	return updated, nil
 }
 
 // validateWithinStoreSchedule ensures the requested [startTime, endTime) range falls entirely
@@ -469,12 +548,18 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 	if newStatus == domain.AppointmentStatusConfirmed &&
 		appointment.PaymentMethod == domain.PaymentMethodCardAdvance &&
 		appointment.PaymentStatus != domain.PaymentStatusPaid {
-		if chargeErr := usecase.paymentProcessor.Charge(ctx, appointment); chargeErr != nil {
+		chargeErr := usecase.paymentProcessor.Charge(ctx, appointment)
+
+		if chargeErr != nil {
+			usecase.recordPaymentTransaction(ctx, appointmentID, appointment.PaymentMethod, domain.PaymentStatusFailed, chargeErr.Error())
+
 			if _, updateErr := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusFailed); updateErr != nil {
 				return nil, fmt.Errorf("recording failed payment: %w", updateErr)
 			}
 			return nil, fmt.Errorf("charging card payment: %w", domain.ErrPaymentFailed)
 		}
+
+		usecase.recordPaymentTransaction(ctx, appointmentID, appointment.PaymentMethod, domain.PaymentStatusPaid, "")
 
 		if _, err := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusPaid); err != nil {
 			return nil, fmt.Errorf("recording payment: %w", err)
@@ -487,6 +572,31 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 	}
 
 	return updated, nil
+}
+
+// ListPaymentTransactions returns the full charge-attempt history for an appointment, most
+// recent first. Only the client who booked it or the store owner may view it.
+func (usecase *AppointmentUseCase) ListPaymentTransactions(ctx context.Context, appointmentID, requesterUserID string) ([]*domain.PaymentTransaction, error) {
+	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("getting appointment: %w", err)
+	}
+
+	store, err := usecase.storeRepo.GetStoreByID(ctx, appointment.StoreID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	if requesterUserID != appointment.UserID && requesterUserID != store.UserID {
+		return nil, fmt.Errorf("%w: only the client who booked it or the store owner can view its payment transactions", domain.ErrForbidden)
+	}
+
+	transactions, err := usecase.paymentTransactionRepo.ListPaymentTransactionsByAppointment(ctx, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing payment transactions: %w", err)
+	}
+
+	return transactions, nil
 }
 
 // ExpireOverdueAppointments moves pending/confirmed appointments whose end_time has already

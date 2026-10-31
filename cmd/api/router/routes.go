@@ -89,6 +89,8 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments", withAuth(appointment.GetBookedAppointments))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/status", withAuth(appointment.UpdateStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/cancel", withAuth(appointment.Cancel))
+	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/confirm-cash-payment", withAuth(appointment.ConfirmCashPayment))
+	srv.RegisterRoutes("GET /api/v1/appointments/{id}/transactions", withAuth(appointment.ListPaymentTransactions))
 }
 
 // setupStoreRatingRoutes registers endpoints for rating a store's completed appointments (mixed).

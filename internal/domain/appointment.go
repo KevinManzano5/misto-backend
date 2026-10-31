@@ -19,9 +19,8 @@ const (
 
 // Appointment payment status values.
 const (
-	// PaymentStatusNotRequired is used for PaymentMethodCashOnSite: the platform never charges it.
-	PaymentStatusNotRequired = "not_required"
-	// PaymentStatusPending means a card charge is expected but hasn't been attempted yet.
+	// PaymentStatusPending means the payment is expected but hasn't been resolved yet: a card
+	// charge not yet attempted, or a cash_on_site payment not yet confirmed by the store owner.
 	PaymentStatusPending = "pending"
 	PaymentStatusPaid    = "paid"
 	PaymentStatusFailed  = "failed"

@@ -91,13 +91,14 @@ func main() {
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
 	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
 	storeRatingRepo := postgres.NewStoreRatingRepository(pool)
+	paymentTransactionRepo := postgres.NewPaymentTransactionRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
 	paymentProcessor := payment.NewStubProcessor()
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, paymentProcessor)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, paymentProcessor, paymentTransactionRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
 
 	// Background jobs

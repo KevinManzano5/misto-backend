@@ -22,6 +22,17 @@ type Appointment struct {
 	PaymentStatus      string             `json:"payment_status"`
 }
 
+type PaymentTransaction struct {
+	ID            pgtype.UUID        `json:"id"`
+	AppointmentID pgtype.UUID        `json:"appointment_id"`
+	Amount        int64              `json:"amount"`
+	Currency      string             `json:"currency"`
+	Status        string             `json:"status"`
+	PaymentMethod string             `json:"payment_method"`
+	FailureReason *string            `json:"failure_reason"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Store struct {
 	ID                       pgtype.UUID        `json:"id"`
 	UserID                   pgtype.UUID        `json:"user_id"`
