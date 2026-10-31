@@ -42,6 +42,7 @@ type StoreRepository interface {
 	UpdateStore(ctx context.Context, store *domain.Store) error
 	DeleteStore(ctx context.Context, id string) error
 	ListStores(ctx context.Context) ([]*domain.Store, error)
+	ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error)
 }
 
 // ScheduleRepository interface
@@ -77,7 +78,8 @@ func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, descripti
 		return nil, err
 	}
 
-	store := domain.NewStore(userID, name, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber)
+	slug := domain.SlugFromName(name)
+	store := domain.NewStore(userID, name, slug, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber)
 	schedules := defaultWeeklySchedules()
 
 	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
@@ -142,6 +144,7 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 
 	if name != nil {
 		store.Name = *name
+		store.Slug = domain.SlugFromName(*name)
 	}
 	if description != nil {
 		store.Description = *description
@@ -188,6 +191,26 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	}
 
 	return updatedStore, nil
+}
+
+// BackfillMissingSlugs computes and persists a slug for every store that doesn't have one yet
+// (created before the slug column existed). It is a system/maintenance action with no requester
+// to authorize against, meant to be run once via a standalone command (see
+// cmd/backfillstoreslugs) rather than from an HTTP handler. Returns how many stores were updated.
+func (usecase *StoreUseCase) BackfillMissingSlugs(ctx context.Context) (int, error) {
+	stores, err := usecase.repo.ListStoresWithoutSlug(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("listing stores without slug: %w", err)
+	}
+
+	for _, store := range stores {
+		store.Slug = domain.SlugFromName(store.Name)
+		if err := usecase.repo.UpdateStore(ctx, store); err != nil {
+			return 0, fmt.Errorf("updating slug for store %s: %w", store.ID, err)
+		}
+	}
+
+	return len(stores), nil
 }
 
 // Delete method

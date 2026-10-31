@@ -15,6 +15,7 @@ const createStore = `-- name: CreateStore :one
 INSERT INTO stores (
     user_id,
     name,
+    slug,
     description,
     appointment_duration,
     timezone,
@@ -24,14 +25,15 @@ INSERT INTO stores (
     allow_same_day_appointments,
     phone_number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number
+RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug
 `
 
 type CreateStoreParams struct {
 	UserID                   pgtype.UUID `json:"user_id"`
 	Name                     string      `json:"name"`
+	Slug                     *string     `json:"slug"`
 	Description              *string     `json:"description"`
 	AppointmentDuration      int32       `json:"appointment_duration"`
 	Timezone                 string      `json:"timezone"`
@@ -46,6 +48,7 @@ func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store
 	row := q.db.QueryRow(ctx, createStore,
 		arg.UserID,
 		arg.Name,
+		arg.Slug,
 		arg.Description,
 		arg.AppointmentDuration,
 		arg.Timezone,
@@ -72,6 +75,7 @@ func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store
 		&i.Address,
 		&i.AllowSameDayAppointments,
 		&i.PhoneNumber,
+		&i.Slug,
 	)
 	return i, err
 }
@@ -92,7 +96,7 @@ func (q *Queries) DeleteStore(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getStoreByID = `-- name: GetStoreByID :one
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
 WHERE id = $1 
   AND deleted_at IS NULL
 LIMIT 1
@@ -117,12 +121,13 @@ func (q *Queries) GetStoreByID(ctx context.Context, id pgtype.UUID) (Store, erro
 		&i.Address,
 		&i.AllowSameDayAppointments,
 		&i.PhoneNumber,
+		&i.Slug,
 	)
 	return i, err
 }
 
 const getStoreByUserID = `-- name: GetStoreByUserID :one
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
 WHERE user_id = $1 
   AND deleted_at IS NULL
 LIMIT 1
@@ -147,12 +152,13 @@ func (q *Queries) GetStoreByUserID(ctx context.Context, userID pgtype.UUID) (Sto
 		&i.Address,
 		&i.AllowSameDayAppointments,
 		&i.PhoneNumber,
+		&i.Slug,
 	)
 	return i, err
 }
 
 const listStoresPaginated = `-- name: ListStoresPaginated :many
-SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number FROM stores
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
 WHERE deleted_at IS NULL
 ORDER BY name ASC
 LIMIT $1 OFFSET $2
@@ -188,6 +194,51 @@ func (q *Queries) ListStoresPaginated(ctx context.Context, arg ListStoresPaginat
 			&i.Address,
 			&i.AllowSameDayAppointments,
 			&i.PhoneNumber,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStoresWithoutSlug = `-- name: ListStoresWithoutSlug :many
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
+WHERE slug IS NULL
+`
+
+// One-off backfill helper: stores created before the slug column existed (migration 000023)
+// have slug = NULL.
+func (q *Queries) ListStoresWithoutSlug(ctx context.Context) ([]Store, error) {
+	rows, err := q.db.Query(ctx, listStoresWithoutSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Store{}
+	for rows.Next() {
+		var i Store
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Description,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.AppointmentDuration,
+			&i.Timezone,
+			&i.AutoConfirmAppointments,
+			&i.Email,
+			&i.Address,
+			&i.AllowSameDayAppointments,
+			&i.PhoneNumber,
+			&i.Slug,
 		); err != nil {
 			return nil, err
 		}
@@ -203,24 +254,26 @@ const updateStore = `-- name: UpdateStore :one
 UPDATE stores
 SET
     name = COALESCE($2, name),
-    description = COALESCE($3, description),
-    is_active = COALESCE($4, is_active),
-    appointment_duration = COALESCE($5, appointment_duration),
-    timezone = COALESCE($6, timezone),
-    auto_confirm_appointments = COALESCE($7, auto_confirm_appointments),
-    email = COALESCE($8, email),
-    address = COALESCE($9, address),
-    allow_same_day_appointments = COALESCE($10, allow_same_day_appointments),
-    phone_number = COALESCE($11, phone_number),
+    slug = COALESCE($3, slug),
+    description = COALESCE($4, description),
+    is_active = COALESCE($5, is_active),
+    appointment_duration = COALESCE($6, appointment_duration),
+    timezone = COALESCE($7, timezone),
+    auto_confirm_appointments = COALESCE($8, auto_confirm_appointments),
+    email = COALESCE($9, email),
+    address = COALESCE($10, address),
+    allow_same_day_appointments = COALESCE($11, allow_same_day_appointments),
+    phone_number = COALESCE($12, phone_number),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL
-RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number
+RETURNING id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug
 `
 
 type UpdateStoreParams struct {
 	ID                       pgtype.UUID `json:"id"`
 	Name                     string      `json:"name"`
+	Slug                     *string     `json:"slug"`
 	Description              *string     `json:"description"`
 	IsActive                 bool        `json:"is_active"`
 	AppointmentDuration      int32       `json:"appointment_duration"`
@@ -236,6 +289,7 @@ func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store
 	row := q.db.QueryRow(ctx, updateStore,
 		arg.ID,
 		arg.Name,
+		arg.Slug,
 		arg.Description,
 		arg.IsActive,
 		arg.AppointmentDuration,
@@ -263,6 +317,7 @@ func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store
 		&i.Address,
 		&i.AllowSameDayAppointments,
 		&i.PhoneNumber,
+		&i.Slug,
 	)
 	return i, err
 }

@@ -49,6 +49,7 @@ type Store struct {
 	Address                  *string            `json:"address"`
 	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
 	PhoneNumber              *string            `json:"phone_number"`
+	Slug                     *string            `json:"slug"`
 }
 
 type StoreRating struct {

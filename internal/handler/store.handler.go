@@ -70,6 +70,7 @@ type storeResponse struct {
 	ID                       string                  `json:"id"`
 	UserID                   string                  `json:"user_id"`
 	Name                     string                  `json:"name"`
+	Slug                     string                  `json:"slug"`
 	Description              string                  `json:"description"`
 	IsActive                 bool                    `json:"is_active"`
 	AppointmentDuration      int32                   `json:"appointment_duration"`
@@ -141,6 +142,7 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		ID:                       store.ID,
 		UserID:                   store.UserID,
 		Name:                     store.Name,
+		Slug:                     store.Slug,
 		Description:              store.Description,
 		IsActive:                 store.IsActive,
 		AppointmentDuration:      store.AppointmentDuration,

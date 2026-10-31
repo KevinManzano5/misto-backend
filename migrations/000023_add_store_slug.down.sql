@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_stores_slug;
+ALTER TABLE stores DROP COLUMN IF EXISTS slug;

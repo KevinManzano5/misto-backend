@@ -2,6 +2,7 @@
 INSERT INTO stores (
     user_id,
     name,
+    slug,
     description,
     appointment_duration,
     timezone,
@@ -11,7 +12,7 @@ INSERT INTO stores (
     allow_same_day_appointments,
     phone_number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING *;
 
@@ -20,6 +21,12 @@ SELECT * FROM stores
 WHERE deleted_at IS NULL
 ORDER BY name ASC
 LIMIT $1 OFFSET $2;
+
+-- name: ListStoresWithoutSlug :many
+-- One-off backfill helper: stores created before the slug column existed (migration 000023)
+-- have slug = NULL.
+SELECT * FROM stores
+WHERE slug IS NULL;
 
 -- name: GetStoreByID :one
 SELECT * FROM stores
@@ -37,15 +44,16 @@ LIMIT 1;
 UPDATE stores
 SET
     name = COALESCE($2, name),
-    description = COALESCE($3, description),
-    is_active = COALESCE($4, is_active),
-    appointment_duration = COALESCE($5, appointment_duration),
-    timezone = COALESCE($6, timezone),
-    auto_confirm_appointments = COALESCE($7, auto_confirm_appointments),
-    email = COALESCE($8, email),
-    address = COALESCE($9, address),
-    allow_same_day_appointments = COALESCE($10, allow_same_day_appointments),
-    phone_number = COALESCE($11, phone_number),
+    slug = COALESCE($3, slug),
+    description = COALESCE($4, description),
+    is_active = COALESCE($5, is_active),
+    appointment_duration = COALESCE($6, appointment_duration),
+    timezone = COALESCE($7, timezone),
+    auto_confirm_appointments = COALESCE($8, auto_confirm_appointments),
+    email = COALESCE($9, email),
+    address = COALESCE($10, address),
+    allow_same_day_appointments = COALESCE($11, allow_same_day_appointments),
+    phone_number = COALESCE($12, phone_number),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL
