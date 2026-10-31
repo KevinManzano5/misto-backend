@@ -11,14 +11,32 @@ const (
 	AppointmentStatusExpired   = "expired"
 )
 
+// Appointment payment method values.
+const (
+	PaymentMethodCashOnSite  = "cash_on_site"
+	PaymentMethodCardAdvance = "card_advance"
+)
+
+// Appointment payment status values.
+const (
+	// PaymentStatusNotRequired is used for PaymentMethodCashOnSite: the platform never charges it.
+	PaymentStatusNotRequired = "not_required"
+	// PaymentStatusPending means a card charge is expected but hasn't been attempted yet.
+	PaymentStatusPending = "pending"
+	PaymentStatusPaid    = "paid"
+	PaymentStatusFailed  = "failed"
+)
+
 // Appointment struct
 type Appointment struct {
-	ID        string
-	StoreID   string
-	UserID    string
-	StartTime time.Time
-	EndTime   time.Time
-	Status    string
+	ID            string
+	StoreID       string
+	UserID        string
+	StartTime     time.Time
+	EndTime       time.Time
+	Status        string
+	PaymentMethod string
+	PaymentStatus string
 	// CancellationReason is the reason given when the appointment was cancelled, empty otherwise.
 	CancellationReason string
 	CreatedAt          time.Time
@@ -43,16 +61,18 @@ type AppointmentWithStore struct {
 }
 
 // NewAppointment constructor
-func NewAppointment(storeID, userID, status string, startTime, endtime time.Time) *Appointment {
+func NewAppointment(storeID, userID, status, paymentMethod, paymentStatus string, startTime, endtime time.Time) *Appointment {
 	now := time.Now()
 
 	return &Appointment{
-		StoreID:   storeID,
-		UserID:    userID,
-		Status:    status,
-		StartTime: startTime,
-		EndTime:   endtime,
-		CreatedAt: now,
-		UpdatedAt: now,
+		StoreID:       storeID,
+		UserID:        userID,
+		Status:        status,
+		PaymentMethod: paymentMethod,
+		PaymentStatus: paymentStatus,
+		StartTime:     startTime,
+		EndTime:       endtime,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 }

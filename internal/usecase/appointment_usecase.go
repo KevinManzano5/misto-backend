@@ -19,7 +19,13 @@ type AppointmentRepository interface {
 	ListAppointmentsByClient(ctx context.Context, clientID string) ([]*domain.AppointmentWithStore, error)
 	GetAppointmentByID(ctx context.Context, id string) (*domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, id, status, cancellationReason string) (*domain.Appointment, error)
+	UpdatePaymentStatus(ctx context.Context, id, paymentStatus string) (*domain.Appointment, error)
 	ExpireOverdueAppointments(ctx context.Context, before time.Time) ([]*domain.Appointment, error)
+}
+
+// PaymentProcessor charges a card payment made in advance for an appointment.
+type PaymentProcessor interface {
+	Charge(ctx context.Context, appointment *domain.Appointment) error
 }
 
 // StoreScheduleRepository interface (Added for checking availability)
@@ -34,17 +40,19 @@ type AppointmentStoreRepository interface {
 
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
-	repo         AppointmentRepository
-	scheduleRepo StoreScheduleRepository
-	storeRepo    AppointmentStoreRepository
+	repo             AppointmentRepository
+	scheduleRepo     StoreScheduleRepository
+	storeRepo        AppointmentStoreRepository
+	paymentProcessor PaymentProcessor
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, paymentProcessor PaymentProcessor) *AppointmentUseCase {
 	return &AppointmentUseCase{
-		repo:         repo,
-		scheduleRepo: scheduleRepo,
-		storeRepo:    storeRepo,
+		repo:             repo,
+		scheduleRepo:     scheduleRepo,
+		storeRepo:        storeRepo,
+		paymentProcessor: paymentProcessor,
 	}
 }
 
@@ -61,7 +69,11 @@ func storeLocation(store *domain.Store) *time.Location {
 }
 
 // Create method
-func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID string, startTime time.Time) (*domain.Appointment, error) {
+func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, paymentMethod string, startTime time.Time) (*domain.Appointment, error) {
+	if paymentMethod != domain.PaymentMethodCashOnSite && paymentMethod != domain.PaymentMethodCardAdvance {
+		return nil, fmt.Errorf("%w: payment method must be %q or %q", domain.ErrInvalidInput, domain.PaymentMethodCashOnSite, domain.PaymentMethodCardAdvance)
+	}
+
 	if startTime.Before(time.Now()) {
 		return nil, fmt.Errorf("%w: cannot schedule an appointment in the past", domain.ErrInvalidInput)
 	}
@@ -86,7 +98,23 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID s
 		status = domain.AppointmentStatusConfirmed
 	}
 
-	appointment := domain.NewAppointment(storeID, userID, status, startTime, endTime)
+	paymentStatus := domain.PaymentStatusNotRequired
+	if paymentMethod == domain.PaymentMethodCardAdvance {
+		paymentStatus = domain.PaymentStatusPending
+	}
+
+	appointment := domain.NewAppointment(storeID, userID, status, paymentMethod, paymentStatus, startTime, endTime)
+
+	// Auto-confirming stores charge the card immediately; a store that reviews appointments
+	// manually only charges when it confirms (see UpdateStatus).
+	if paymentMethod == domain.PaymentMethodCardAdvance && store.AutoConfirmAppointments {
+		if err := usecase.paymentProcessor.Charge(ctx, appointment); err != nil {
+			appointment.Status = domain.AppointmentStatusPending
+			appointment.PaymentStatus = domain.PaymentStatusFailed
+		} else {
+			appointment.PaymentStatus = domain.PaymentStatusPaid
+		}
+	}
 
 	if err := usecase.repo.CreateAppointment(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("creating appointment: %w", err)
@@ -436,6 +464,21 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 
 	if appointment.Status != domain.AppointmentStatusPending {
 		return nil, fmt.Errorf("%w: appointment is not pending approval", domain.ErrInvalidInput)
+	}
+
+	if newStatus == domain.AppointmentStatusConfirmed &&
+		appointment.PaymentMethod == domain.PaymentMethodCardAdvance &&
+		appointment.PaymentStatus != domain.PaymentStatusPaid {
+		if chargeErr := usecase.paymentProcessor.Charge(ctx, appointment); chargeErr != nil {
+			if _, updateErr := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusFailed); updateErr != nil {
+				return nil, fmt.Errorf("recording failed payment: %w", updateErr)
+			}
+			return nil, fmt.Errorf("charging card payment: %w", domain.ErrPaymentFailed)
+		}
+
+		if _, err := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusPaid); err != nil {
+			return nil, fmt.Errorf("recording payment: %w", err)
+		}
 	}
 
 	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus, reason)

@@ -14,6 +14,7 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/handler"
 	"github.com/KevinManzano5/misto-backend/internal/logger"
 	"github.com/KevinManzano5/misto-backend/internal/middlewares"
+	"github.com/KevinManzano5/misto-backend/internal/payment"
 	"github.com/KevinManzano5/misto-backend/internal/repository/postgres"
 	"github.com/KevinManzano5/misto-backend/internal/scheduler"
 	"github.com/KevinManzano5/misto-backend/internal/server"
@@ -69,11 +70,12 @@ func main() {
 	log.Info("redis connection success")
 
 	jwtSecret := os.Getenv("JWT_SECRET")
-	refreshTokenDuration := 7 * 24 * time.Hour
+	accessTokenDuration := accessTokenDurationFromEnv(log)
+	refreshTokenDuration := refreshTokenDurationFromEnv(log)
 
 	jwtManager, err := auth.NewJWTManager(auth.JWTConfig{
 		SecretKey:            []byte(jwtSecret),
-		AccessTokenDuration:  15 * time.Minute,
+		AccessTokenDuration:  accessTokenDuration,
 		RefreshTokenDuration: refreshTokenDuration,
 	})
 	if err != nil {
@@ -88,12 +90,15 @@ func main() {
 	storeRepo := postgres.NewStoreRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
 	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
+	storeRatingRepo := postgres.NewStoreRatingRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo)
+	paymentProcessor := payment.NewStubProcessor()
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, paymentProcessor)
+	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
 
 	// Background jobs
 	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)
@@ -131,6 +136,7 @@ func main() {
 		Auth:        handler.NewAuthHandler(authUC, validate, log),
 		Store:       handler.NewStoreHandler(storeUC, validate, log),
 		Appointment: handler.NewAppointmentHandler(appointmentUC, validate, log),
+		StoreRating: handler.NewStoreRatingHandler(storeRatingUC, validate, log),
 	}
 
 	// Initialization of specific middlewares
@@ -151,18 +157,40 @@ func main() {
 func appointmentExpiryIntervalFromEnv(log *slog.Logger) time.Duration {
 	const defaultInterval = 5 * time.Minute
 
-	raw := os.Getenv("APPOINTMENT_EXPIRY_INTERVAL")
+	return durationFromEnv(log, "APPOINTMENT_EXPIRY_INTERVAL", defaultInterval)
+}
+
+// accessTokenDurationFromEnv reads ACCESS_TOKEN_DURATION (a Go duration string, e.g. "15m") and
+// falls back to a 15 minute default when unset or invalid.
+func accessTokenDurationFromEnv(log *slog.Logger) time.Duration {
+	const defaultDuration = 15 * time.Minute
+
+	return durationFromEnv(log, "ACCESS_TOKEN_DURATION", defaultDuration)
+}
+
+// refreshTokenDurationFromEnv reads REFRESH_TOKEN_DURATION (a Go duration string, e.g. "168h") and
+// falls back to a 7 day default when unset or invalid.
+func refreshTokenDurationFromEnv(log *slog.Logger) time.Duration {
+	const defaultDuration = 7 * 24 * time.Hour
+
+	return durationFromEnv(log, "REFRESH_TOKEN_DURATION", defaultDuration)
+}
+
+// durationFromEnv reads a Go duration string from the given environment variable, falling back to
+// defaultDuration when unset or invalid.
+func durationFromEnv(log *slog.Logger, key string, defaultDuration time.Duration) time.Duration {
+	raw := os.Getenv(key)
 	if raw == "" {
-		return defaultInterval
+		return defaultDuration
 	}
 
-	interval, err := time.ParseDuration(raw)
+	duration, err := time.ParseDuration(raw)
 	if err != nil {
-		log.Error("invalid APPOINTMENT_EXPIRY_INTERVAL, using default", slog.Any("error", err), slog.Duration("default", defaultInterval))
-		return defaultInterval
+		log.Error("invalid "+key+", using default", slog.Any("error", err), slog.Duration("default", defaultDuration))
+		return defaultDuration
 	}
 
-	return interval
+	return duration
 }
 
 func setupLogger() *slog.Logger {

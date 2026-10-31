@@ -18,6 +18,8 @@ type Appointment struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	CancellationReason *string            `json:"cancellation_reason"`
+	PaymentMethod      string             `json:"payment_method"`
+	PaymentStatus      string             `json:"payment_status"`
 }
 
 type Store struct {
@@ -36,6 +38,17 @@ type Store struct {
 	Address                  *string            `json:"address"`
 	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
 	PhoneNumber              *string            `json:"phone_number"`
+}
+
+type StoreRating struct {
+	ID            pgtype.UUID        `json:"id"`
+	AppointmentID pgtype.UUID        `json:"appointment_id"`
+	StoreID       pgtype.UUID        `json:"store_id"`
+	ClientID      pgtype.UUID        `json:"client_id"`
+	Score         int16              `json:"score"`
+	Comment       *string            `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type StoreSchedule struct {

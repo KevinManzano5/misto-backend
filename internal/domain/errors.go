@@ -16,4 +16,6 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 	// ErrInternal reutilize
 	ErrInternal = errors.New("internal error")
+	// ErrPaymentFailed indicates a valid payment attempt was rejected by the payment processor.
+	ErrPaymentFailed = errors.New("payment failed")
 )

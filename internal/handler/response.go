@@ -72,6 +72,11 @@ func RespondError(writer http.ResponseWriter, request *http.Request, logger *slo
 		problem.Title = "You're not allowed to see this content"
 		problem.Status = http.StatusForbidden
 		problem.Detail = err.Error()
+	case errors.Is(err, domain.ErrPaymentFailed):
+		problem.Type = problemBaseURL + "/payment-failed"
+		problem.Title = "Payment failed"
+		problem.Status = http.StatusPaymentRequired
+		problem.Detail = err.Error()
 	case errors.Is(err, domain.ErrInvalidInput):
 		problem.Type = problemBaseURL + "/bad-request"
 		problem.Title = "Invalid request"

@@ -32,8 +32,9 @@ func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, validator *valid
 
 // createAppointmentRequest struct
 type createAppointmentRequest struct {
-	StoreID   string    `json:"store_id" validate:"required,uuid"`
-	StartTime time.Time `json:"start_time" validate:"required"`
+	StoreID       string    `json:"store_id" validate:"required,uuid"`
+	StartTime     time.Time `json:"start_time" validate:"required"`
+	PaymentMethod string    `json:"payment_method" validate:"required,oneof=cash_on_site card_advance"`
 }
 
 // appointmentResponse struct
@@ -44,6 +45,8 @@ type appointmentResponse struct {
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
 	Status             string    `json:"status"`
+	PaymentMethod      string    `json:"payment_method"`
+	PaymentStatus      string    `json:"payment_status"`
 	CancellationReason string    `json:"cancellation_reason,omitempty"`
 }
 
@@ -108,6 +111,7 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 		request.Context(),
 		req.StoreID,
 		middlewares.GetUserID(request),
+		req.PaymentMethod,
 		req.StartTime,
 	)
 
@@ -117,12 +121,14 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 	}
 
 	if err := RespondJSON(writer, http.StatusCreated, appointmentResponse{
-		ID:        appointment.ID,
-		StoreID:   appointment.StoreID,
-		UserID:    appointment.UserID,
-		StartTime: appointment.StartTime,
-		EndTime:   appointment.EndTime,
-		Status:    appointment.Status,
+		ID:            appointment.ID,
+		StoreID:       appointment.StoreID,
+		UserID:        appointment.UserID,
+		StartTime:     appointment.StartTime,
+		EndTime:       appointment.EndTime,
+		Status:        appointment.Status,
+		PaymentMethod: appointment.PaymentMethod,
+		PaymentStatus: appointment.PaymentStatus,
 	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
@@ -177,6 +183,8 @@ type bookedAppointmentResponse struct {
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
 	Status             string    `json:"status"`
+	PaymentMethod      string    `json:"payment_method"`
+	PaymentStatus      string    `json:"payment_status"`
 	CancellationReason string    `json:"cancellation_reason,omitempty"`
 	ClientUsername     string    `json:"client_username"`
 	ClientEmail        string    `json:"client_email"`
@@ -215,6 +223,8 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 			StartTime:          appointment.StartTime,
 			EndTime:            appointment.EndTime,
 			Status:             appointment.Status,
+			PaymentMethod:      appointment.PaymentMethod,
+			PaymentStatus:      appointment.PaymentStatus,
 			CancellationReason: appointment.CancellationReason,
 			ClientUsername:     appointment.ClientUsername,
 			ClientEmail:        appointment.ClientEmail,
@@ -249,12 +259,14 @@ type cancelAppointmentRequest struct {
 
 // myAppointmentResponse struct
 type myAppointmentResponse struct {
-	ID        string    `json:"id"`
-	StoreID   string    `json:"store_id"`
-	StoreName string    `json:"store_name"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Status    string    `json:"status"`
+	ID            string    `json:"id"`
+	StoreID       string    `json:"store_id"`
+	StoreName     string    `json:"store_name"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	Status        string    `json:"status"`
+	PaymentMethod string    `json:"payment_method"`
+	PaymentStatus string    `json:"payment_status"`
 }
 
 // GetMyAppointments endpoint (e.g., GET /appointments)
@@ -275,12 +287,14 @@ func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter,
 	response := make([]myAppointmentResponse, 0, len(appointments))
 	for _, appointment := range appointments {
 		response = append(response, myAppointmentResponse{
-			ID:        appointment.ID,
-			StoreID:   appointment.StoreID,
-			StoreName: appointment.StoreName,
-			StartTime: appointment.StartTime,
-			EndTime:   appointment.EndTime,
-			Status:    appointment.Status,
+			ID:            appointment.ID,
+			StoreID:       appointment.StoreID,
+			StoreName:     appointment.StoreName,
+			StartTime:     appointment.StartTime,
+			EndTime:       appointment.EndTime,
+			Status:        appointment.Status,
+			PaymentMethod: appointment.PaymentMethod,
+			PaymentStatus: appointment.PaymentStatus,
 		})
 	}
 
@@ -358,6 +372,8 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,
 		Status:             appointment.Status,
+		PaymentMethod:      appointment.PaymentMethod,
+		PaymentStatus:      appointment.PaymentStatus,
 		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
 		handler.logger.ErrorContext(
@@ -432,6 +448,8 @@ func (handler *AppointmentHandler) Cancel(writer http.ResponseWriter, request *h
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,
 		Status:             appointment.Status,
+		PaymentMethod:      appointment.PaymentMethod,
+		PaymentStatus:      appointment.PaymentStatus,
 		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
 		handler.logger.ErrorContext(

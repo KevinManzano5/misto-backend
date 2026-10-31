@@ -16,6 +16,7 @@ type AppHandlers struct {
 	Auth        *handler.AuthHandler
 	Store       *handler.StoreHandler
 	Appointment *handler.AppointmentHandler
+	StoreRating *handler.StoreRatingHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
@@ -24,6 +25,7 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middlewa
 	setupAuthRoutes(srv, h.Auth, h.User, authMW)
 	setupStoreRoutes(srv, h.Store, authMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
+	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
 }
 
 // setupSystemRoutes registers health and documentation endpoints (public)
@@ -87,4 +89,24 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments", withAuth(appointment.GetBookedAppointments))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/status", withAuth(appointment.UpdateStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/cancel", withAuth(appointment.Cancel))
+}
+
+// setupStoreRatingRoutes registers endpoints for rating a store's completed appointments (mixed).
+// Create is nested under the appointment it rates (identity and authorization both derive from
+// it); listing/summary are nested under the store (how a public store page consumes them);
+// update/delete are top-level once the rating's own ID is known.
+func setupStoreRatingRoutes(srv *server.Server, rating *handler.StoreRatingHandler, authMW middlewares.Middleware) {
+	// Helper for wrapping protected handlers
+	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
+		return middlewares.Chain(handlerFunc, authMW)
+	}
+
+	// Public
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/ratings", http.HandlerFunc(rating.ListByStore))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/ratings/summary", http.HandlerFunc(rating.GetSummary))
+
+	// Private
+	srv.RegisterRoutes("POST /api/v1/appointments/{appointmentId}/ratings", withAuth(rating.Create))
+	srv.RegisterRoutes("PATCH /api/v1/ratings/{id}", withAuth(rating.Update))
+	srv.RegisterRoutes("DELETE /api/v1/ratings/{id}", withAuth(rating.Delete))
 }
