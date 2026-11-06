@@ -221,6 +221,21 @@ func (repo *StoreRepository) GetStoreByUserID(ctx context.Context, id string) (*
 	return toDomainStore(result), nil
 }
 
+// GetStoreBySlug method
+func (repo *StoreRepository) GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error) {
+	result, err := repo.queries.GetStoreBySlug(ctx, &slug)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("store with slug %s: %w", slug, domain.ErrNotFound)
+		}
+
+		return nil, fmt.Errorf("getting store %s: %w", slug, err)
+	}
+
+	return toDomainStore(result), nil
+}
+
 // UpdateStore method
 func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Store) error {
 	var storeID pgtype.UUID

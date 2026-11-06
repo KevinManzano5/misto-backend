@@ -126,9 +126,40 @@ func (q *Queries) GetStoreByID(ctx context.Context, id pgtype.UUID) (Store, erro
 	return i, err
 }
 
+const getStoreBySlug = `-- name: GetStoreBySlug :one
+SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
+WHERE slug = $1
+  AND deleted_at IS NULL
+LIMIT 1
+`
+
+func (q *Queries) GetStoreBySlug(ctx context.Context, slug *string) (Store, error) {
+	row := q.db.QueryRow(ctx, getStoreBySlug, slug)
+	var i Store
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.AppointmentDuration,
+		&i.Timezone,
+		&i.AutoConfirmAppointments,
+		&i.Email,
+		&i.Address,
+		&i.AllowSameDayAppointments,
+		&i.PhoneNumber,
+		&i.Slug,
+	)
+	return i, err
+}
+
 const getStoreByUserID = `-- name: GetStoreByUserID :one
 SELECT id, user_id, name, description, is_active, created_at, updated_at, deleted_at, appointment_duration, timezone, auto_confirm_appointments, email, address, allow_same_day_appointments, phone_number, slug FROM stores
-WHERE user_id = $1 
+WHERE user_id = $1
   AND deleted_at IS NULL
 LIMIT 1
 `

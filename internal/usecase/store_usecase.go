@@ -39,6 +39,7 @@ type StoreRepository interface {
 	CreateStoreWithSchedules(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 	GetStoreByUserID(ctx context.Context, userID string) (*domain.Store, error)
+	GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error)
 	UpdateStore(ctx context.Context, store *domain.Store) error
 	DeleteStore(ctx context.Context, id string) error
 	ListStores(ctx context.Context) ([]*domain.Store, error)
@@ -105,6 +106,17 @@ func defaultWeeklySchedules() []*domain.StoreSchedule {
 // GetByID method
 func (usecase *StoreUseCase) GetByID(ctx context.Context, storeID string) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
+
+	if err != nil {
+		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	return store, nil
+}
+
+// GetBySlug method
+func (usecase *StoreUseCase) GetBySlug(ctx context.Context, slug string) (*domain.Store, error) {
+	store, err := usecase.repo.GetStoreBySlug(ctx, slug)
 
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)

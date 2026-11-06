@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -113,6 +114,14 @@ func toStoreScheduleResponse(schedule *domain.StoreSchedule) storeScheduleRespon
 		CreatedAt: schedule.CreatedAt,
 		UpdatedAt: schedule.UpdatedAt,
 	}
+}
+
+// uuidPattern matches a canonical (8-4-4-4-12 hex) UUID, case-insensitively.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// isUUID reports whether value looks like a UUID, as opposed to a store slug.
+func isUUID(value string) bool {
+	return uuidPattern.MatchString(value)
 }
 
 // parseDayOfWeek converts the {day} path value to a valid day-of-week (0=Sunday..6=Saturday).
@@ -240,11 +249,21 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 	}
 }
 
-// GetStoreByID endpoint
+// GetStoreByID endpoint. The {id} path value may be either a store's UUID or its slug.
 func (handler *StoreHandler) GetStoreByID(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("id")
 
-	store, err := handler.usecase.GetByID(request.Context(), id)
+	var (
+		store *domain.Store
+		err   error
+	)
+
+	if isUUID(id) {
+		store, err = handler.usecase.GetByID(request.Context(), id)
+	} else {
+		store, err = handler.usecase.GetBySlug(request.Context(), id)
+	}
+
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

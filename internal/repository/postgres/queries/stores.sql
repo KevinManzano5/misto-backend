@@ -36,7 +36,13 @@ LIMIT 1;
 
 -- name: GetStoreByUserID :one
 SELECT * FROM stores
-WHERE user_id = $1 
+WHERE user_id = $1
+  AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: GetStoreBySlug :one
+SELECT * FROM stores
+WHERE slug = $1
   AND deleted_at IS NULL
 LIMIT 1;
 

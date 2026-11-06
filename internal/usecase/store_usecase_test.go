@@ -32,6 +32,10 @@ func (f *fakeStoreRepository) GetStoreByUserID(ctx context.Context, userID strin
 	panic("not implemented")
 }
 
+func (f *fakeStoreRepository) GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error) {
+	panic("not implemented")
+}
+
 func (f *fakeStoreRepository) UpdateStore(ctx context.Context, store *domain.Store) error {
 	return f.updateStoreFunc(ctx, store)
 }
