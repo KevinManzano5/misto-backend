@@ -20,17 +20,19 @@ import (
 
 // StoreHandler struct
 type StoreHandler struct {
-	usecase   *usecase.StoreUseCase
-	validator *validator.Validator
-	logger    *slog.Logger
+	usecase         *usecase.StoreUseCase
+	categoryUsecase *usecase.StoreCategoryAssignmentUseCase
+	validator       *validator.Validator
+	logger          *slog.Logger
 }
 
 // NewStoreHandler constructor
-func NewStoreHandler(usecase *usecase.StoreUseCase, validator *validator.Validator, logger *slog.Logger) *StoreHandler {
+func NewStoreHandler(usecase *usecase.StoreUseCase, categoryUsecase *usecase.StoreCategoryAssignmentUseCase, validator *validator.Validator, logger *slog.Logger) *StoreHandler {
 	return &StoreHandler{
-		usecase:   usecase,
-		validator: validator,
-		logger:    logger,
+		usecase:         usecase,
+		categoryUsecase: categoryUsecase,
+		validator:       validator,
+		logger:          logger,
 	}
 }
 
@@ -82,8 +84,14 @@ type storeResponse struct {
 	AllowSameDayAppointments bool                    `json:"allow_same_day_appointments"`
 	PhoneNumber              string                  `json:"phone_number"`
 	Schedules                []storeScheduleResponse `json:"schedules"`
+	Categories               []storeCategoryResponse `json:"categories"`
 	CreatedAt                time.Time               `json:"created_at"`
 	UpdatedAt                time.Time               `json:"updated_at"`
+}
+
+// replaceStoreCategoriesRequest struct
+type replaceStoreCategoriesRequest struct {
+	CategoryIDs []string `json:"category_ids" validate:"required,max=5,dive,uuid"`
 }
 
 type upsertStoreScheduleRequest struct {
@@ -134,8 +142,19 @@ func parseDayOfWeek(value string) (int32, error) {
 	return int32(day), nil
 }
 
-// buildStoreResponse composes the full store response, embedding its weekly schedules so
-// callers don't need a separate request to see a store's opening hours.
+func toStoreCategoryResponse(category *domain.StoreCategory) storeCategoryResponse {
+	return storeCategoryResponse{
+		ID:          category.ID,
+		Name:        category.Name,
+		Slug:        category.Slug,
+		Description: category.Description,
+		CreatedAt:   category.CreatedAt,
+		UpdatedAt:   category.UpdatedAt,
+	}
+}
+
+// buildStoreResponse composes the full store response, embedding its weekly schedules and
+// assigned categories so callers don't need separate requests to see them.
 func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store) (storeResponse, error) {
 	schedules, err := handler.usecase.ListSchedules(ctx, store.ID)
 	if err != nil {
@@ -145,6 +164,16 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 	scheduleResponses := make([]storeScheduleResponse, 0, len(schedules))
 	for _, schedule := range schedules {
 		scheduleResponses = append(scheduleResponses, toStoreScheduleResponse(schedule))
+	}
+
+	categories, err := handler.categoryUsecase.ListStoreCategories(ctx, store.ID)
+	if err != nil {
+		return storeResponse{}, fmt.Errorf("listing store categories: %w", err)
+	}
+
+	categoryResponses := make([]storeCategoryResponse, 0, len(categories))
+	for _, category := range categories {
+		categoryResponses = append(categoryResponses, toStoreCategoryResponse(category))
 	}
 
 	return storeResponse{
@@ -162,6 +191,7 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              store.PhoneNumber,
 		Schedules:                scheduleResponses,
+		Categories:               categoryResponses,
 		CreatedAt:                store.CreatedAt,
 		UpdatedAt:                store.UpdatedAt,
 	}, nil
@@ -494,6 +524,76 @@ func (handler *StoreHandler) UpsertSchedule(writer http.ResponseWriter, request 
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to create response JSON",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// ReplaceCategories endpoint (PUT /stores/{id}/categories). Replaces the full set of categories
+// assigned to a store; only the store's owner may call this.
+func (handler *StoreHandler) ReplaceCategories(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("id")
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req replaceStoreCategoriesRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if decoder.More() {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrs := handler.validator.Validate(req); validationErrs != nil {
+		if err := RespondValidationError(writer, validationErrs); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"error trying to create validation response",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+		return
+	}
+
+	categories, err := handler.categoryUsecase.ReplaceCategories(request.Context(), storeID, middlewares.GetUserID(request), req.CategoryIDs)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]storeCategoryResponse, 0, len(categories))
+	for _, category := range categories {
+		response = append(response, toStoreCategoryResponse(category))
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
 			"error", err,
 			"method", request.Method,
 			"path", request.URL.Path,

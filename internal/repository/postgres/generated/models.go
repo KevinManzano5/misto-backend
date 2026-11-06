@@ -52,6 +52,21 @@ type Store struct {
 	Slug                     *string            `json:"slug"`
 }
 
+type StoreCategory struct {
+	ID          pgtype.UUID        `json:"id"`
+	Name        string             `json:"name"`
+	Slug        string             `json:"slug"`
+	Description *string            `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StoreCategoryAssignment struct {
+	StoreID    pgtype.UUID        `json:"store_id"`
+	CategoryID pgtype.UUID        `json:"category_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type StoreRating struct {
 	ID            pgtype.UUID        `json:"id"`
 	AppointmentID pgtype.UUID        `json:"appointment_id"`

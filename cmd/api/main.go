@@ -92,6 +92,8 @@ func main() {
 	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
 	storeRatingRepo := postgres.NewStoreRatingRepository(pool)
 	paymentTransactionRepo := postgres.NewPaymentTransactionRepository(pool)
+	storeCategoryRepo := postgres.NewStoreCategoryRepository(pool)
+	storeCategoryAssignmentRepo := postgres.NewStoreCategoryAssignmentRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
@@ -100,6 +102,8 @@ func main() {
 	paymentProcessor := payment.NewStubProcessor()
 	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, paymentProcessor, paymentTransactionRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
+	storeCategoryUC := usecase.NewStoreCategoryUseCase(storeCategoryRepo)
+	storeCategoryAssignmentUC := usecase.NewStoreCategoryAssignmentUseCase(storeCategoryAssignmentRepo, storeRepo)
 
 	// Background jobs
 	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)
@@ -132,12 +136,13 @@ func main() {
 
 	// Grouping of handlers
 	handlers := &router.AppHandlers{
-		Health:      handler.NewHealthHandler(),
-		User:        handler.NewUserHandler(userUC, storeUC, validate, log),
-		Auth:        handler.NewAuthHandler(authUC, validate, log),
-		Store:       handler.NewStoreHandler(storeUC, validate, log),
-		Appointment: handler.NewAppointmentHandler(appointmentUC, validate, log),
-		StoreRating: handler.NewStoreRatingHandler(storeRatingUC, validate, log),
+		Health:        handler.NewHealthHandler(),
+		User:          handler.NewUserHandler(userUC, storeUC, validate, log),
+		Auth:          handler.NewAuthHandler(authUC, validate, log),
+		Store:         handler.NewStoreHandler(storeUC, storeCategoryAssignmentUC, validate, log),
+		Appointment:   handler.NewAppointmentHandler(appointmentUC, validate, log),
+		StoreRating:   handler.NewStoreRatingHandler(storeRatingUC, validate, log),
+		StoreCategory: handler.NewStoreCategoryHandler(storeCategoryUC, log),
 	}
 
 	// Initialization of specific middlewares

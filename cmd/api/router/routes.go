@@ -11,12 +11,13 @@ import (
 
 // AppHandlers groups all instantiated handlers to facilitate dependency injection.
 type AppHandlers struct {
-	Health      http.Handler
-	User        *handler.UserHandler
-	Auth        *handler.AuthHandler
-	Store       *handler.StoreHandler
-	Appointment *handler.AppointmentHandler
-	StoreRating *handler.StoreRatingHandler
+	Health        http.Handler
+	User          *handler.UserHandler
+	Auth          *handler.AuthHandler
+	Store         *handler.StoreHandler
+	Appointment   *handler.AppointmentHandler
+	StoreRating   *handler.StoreRatingHandler
+	StoreCategory *handler.StoreCategoryHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
@@ -26,6 +27,7 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middlewa
 	setupStoreRoutes(srv, h.Store, authMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
+	setupStoreCategoryRoutes(srv, h.StoreCategory)
 }
 
 // setupSystemRoutes registers health and documentation endpoints (public)
@@ -71,6 +73,16 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW mi
 	// === Store schedules routes ===
 	// Private
 	srv.RegisterRoutes("PUT /api/v1/stores/{storeId}/schedules/{day}", withAuth(store.UpsertSchedule))
+
+	// === Store categories routes ===
+	// Private. A store's assigned categories are embedded directly in its GET response
+	// (storeResponse.Categories), so there is no separate read endpoint for them.
+	srv.RegisterRoutes("PUT /api/v1/stores/{id}/categories", withAuth(store.ReplaceCategories))
+}
+
+// setupStoreCategoryRoutes registers endpoints for the store category catalog (public).
+func setupStoreCategoryRoutes(srv *server.Server, category *handler.StoreCategoryHandler) {
+	srv.RegisterRoutes("GET /api/v1/store-categories", http.HandlerFunc(category.ListCategories))
 }
 
 // setupAppointmentRoutes registers endpoints for appointment management (mixed)
