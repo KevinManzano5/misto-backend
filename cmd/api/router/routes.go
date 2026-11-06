@@ -18,6 +18,7 @@ type AppHandlers struct {
 	Appointment   *handler.AppointmentHandler
 	StoreRating   *handler.StoreRatingHandler
 	StoreCategory *handler.StoreCategoryHandler
+	StoreService  *handler.StoreServiceHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
@@ -28,6 +29,7 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middlewa
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
 	setupStoreCategoryRoutes(srv, h.StoreCategory)
+	setupStoreServiceRoutes(srv, h.StoreService, authMW)
 }
 
 // setupSystemRoutes registers health and documentation endpoints (public)
@@ -124,4 +126,23 @@ func setupStoreRatingRoutes(srv *server.Server, rating *handler.StoreRatingHandl
 	srv.RegisterRoutes("POST /api/v1/appointments/{appointmentId}/ratings", withAuth(rating.Create))
 	srv.RegisterRoutes("PATCH /api/v1/ratings/{id}", withAuth(rating.Update))
 	srv.RegisterRoutes("DELETE /api/v1/ratings/{id}", withAuth(rating.Delete))
+}
+
+// setupStoreServiceRoutes registers endpoints for a store's services (mixed). Listing and
+// creation are nested under the store; update/delete are top-level once the service's own ID is
+// known, mirroring setupStoreRatingRoutes. Only the store's owner may create, update, or delete
+// a service, enforced in the usecase.
+func setupStoreServiceRoutes(srv *server.Server, service *handler.StoreServiceHandler, authMW middlewares.Middleware) {
+	// Helper for wrapping protected handlers
+	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
+		return middlewares.Chain(handlerFunc, authMW)
+	}
+
+	// Public
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/services", http.HandlerFunc(service.ListByStore))
+
+	// Private
+	srv.RegisterRoutes("POST /api/v1/stores/{storeId}/services", withAuth(service.Create))
+	srv.RegisterRoutes("PATCH /api/v1/services/{id}", withAuth(service.Update))
+	srv.RegisterRoutes("DELETE /api/v1/services/{id}", withAuth(service.Delete))
 }

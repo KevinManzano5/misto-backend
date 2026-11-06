@@ -25,6 +25,7 @@ LIMIT 1;
 -- name: CreateAppointment :one
 INSERT INTO appointments (
     store_id,
+    service_id,
     client_id,
     start_time,
     end_time,
@@ -32,7 +33,7 @@ INSERT INTO appointments (
     payment_method,
     payment_status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -52,6 +53,7 @@ ORDER BY start_time ASC;
 SELECT
     a.id,
     a.store_id,
+    a.service_id,
     a.client_id,
     a.start_time,
     a.end_time,
@@ -100,6 +102,7 @@ RETURNING *;
 SELECT
     a.id,
     a.store_id,
+    a.service_id,
     a.client_id,
     a.start_time,
     a.end_time,

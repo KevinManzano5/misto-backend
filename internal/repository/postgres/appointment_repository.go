@@ -30,9 +30,15 @@ func toDomainAppointment(appointment postgres.Appointment) *domain.Appointment {
 		cancellationReason = *appointment.CancellationReason
 	}
 
+	var serviceID string
+	if appointment.ServiceID.Valid {
+		serviceID = appointment.ServiceID.String()
+	}
+
 	return &domain.Appointment{
 		ID:                 appointment.ID.String(),
 		StoreID:            appointment.StoreID.String(),
+		ServiceID:          serviceID,
 		UserID:             appointment.ClientID.String(),
 		StartTime:          appointment.StartTime.Time.UTC(),
 		EndTime:            appointment.EndTime.Time.UTC(),
@@ -58,10 +64,13 @@ func NewAppointmentRepository(pool *pgxpool.Pool) *AppointmentRepository {
 // appointment, all within a single transaction, so a concurrent request can never slip past
 // either check before either insert commits.
 func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appointment *domain.Appointment) error {
-	var storeID, clientID pgtype.UUID
+	var storeID, serviceID, clientID pgtype.UUID
 
 	if err := storeID.Scan(appointment.StoreID); err != nil {
 		return fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+	if err := serviceID.Scan(appointment.ServiceID); err != nil {
+		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
 	}
 	if err := clientID.Scan(appointment.UserID); err != nil {
 		return fmt.Errorf("invalid userID: %w", domain.ErrInvalidInput)
@@ -106,6 +115,7 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	result, err := txQueries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
 		StoreID:       storeID,
+		ServiceID:     serviceID,
 		ClientID:      clientID,
 		StartTime:     start,
 		EndTime:       end,
@@ -122,6 +132,9 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 	}
 
 	appointment.ID = result.ID.String()
+	if result.ServiceID.Valid {
+		appointment.ServiceID = result.ServiceID.String()
+	}
 	appointment.Status = result.Status
 	appointment.PaymentMethod = result.PaymentMethod
 	appointment.PaymentStatus = result.PaymentStatus
@@ -139,8 +152,8 @@ func translateAppointmentWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "23503": // foreign_key_violation: store_id or client_id does not reference an existing row
-			return fmt.Errorf("%w: referenced store or client does not exist", domain.ErrInvalidInput)
+		case "23503": // foreign_key_violation: store_id, service_id, or client_id does not reference an existing row
+			return fmt.Errorf("%w: referenced store, service, or client does not exist", domain.ErrInvalidInput)
 		case "23505": // unique_violation
 			return fmt.Errorf("%w", domain.ErrAlreadyExists)
 		}
@@ -216,10 +229,16 @@ func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx cont
 			cancellationReason = *result.CancellationReason
 		}
 
+		var serviceID string
+		if result.ServiceID.Valid {
+			serviceID = result.ServiceID.String()
+		}
+
 		appointments = append(appointments, &domain.AppointmentWithClient{
 			Appointment: domain.Appointment{
 				ID:                 result.ID.String(),
 				StoreID:            result.StoreID.String(),
+				ServiceID:          serviceID,
 				UserID:             result.ClientID.String(),
 				StartTime:          result.StartTime.Time.UTC(),
 				EndTime:            result.EndTime.Time.UTC(),
@@ -256,10 +275,16 @@ func (repo *AppointmentRepository) ListAppointmentsByClient(ctx context.Context,
 
 	appointments := make([]*domain.AppointmentWithStore, 0, len(results))
 	for _, result := range results {
+		var serviceID string
+		if result.ServiceID.Valid {
+			serviceID = result.ServiceID.String()
+		}
+
 		appointments = append(appointments, &domain.AppointmentWithStore{
 			Appointment: domain.Appointment{
 				ID:            result.ID.String(),
 				StoreID:       result.StoreID.String(),
+				ServiceID:     serviceID,
 				UserID:        result.ClientID.String(),
 				StartTime:     result.StartTime.Time.UTC(),
 				EndTime:       result.EndTime.Time.UTC(),
