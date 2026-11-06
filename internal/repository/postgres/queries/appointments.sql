@@ -13,15 +13,26 @@ WHERE store_id = sqlc.arg(store_id)
   AND client_id = sqlc.arg(client_id)
   AND status IN ('pending', 'confirmed');
 
+-- name: GetActiveAppointmentByStoreAndClient :one
+-- Returns the client's pending/confirmed appointment at this store, if any. Zero rows is a
+-- normal, expected outcome here (no active appointment), not a not-found error.
+SELECT * FROM appointments
+WHERE store_id = sqlc.arg(store_id)
+  AND client_id = sqlc.arg(client_id)
+  AND status IN ('pending', 'confirmed')
+LIMIT 1;
+
 -- name: CreateAppointment :one
 INSERT INTO appointments (
     store_id,
     client_id,
     start_time,
     end_time,
-    status
+    status,
+    payment_method,
+    payment_status
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
 
@@ -45,6 +56,8 @@ SELECT
     a.start_time,
     a.end_time,
     a.status,
+    a.payment_method,
+    a.payment_status,
     a.cancellation_reason,
     a.created_at,
     a.updated_at,
@@ -73,6 +86,14 @@ SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAppointmentPaymentStatus :one
+UPDATE appointments
+SET
+    payment_status = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
 -- name: ListAppointmentsByClient :many
 -- Every appointment ever booked by a client, any status, most recent first, along with the
 -- basic info of the store it was booked at, for the client's own "my appointments" view.
@@ -83,6 +104,8 @@ SELECT
     a.start_time,
     a.end_time,
     a.status,
+    a.payment_method,
+    a.payment_status,
     a.created_at,
     a.updated_at,
     s.name AS store_name

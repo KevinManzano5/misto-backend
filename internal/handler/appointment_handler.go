@@ -32,8 +32,9 @@ func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, validator *valid
 
 // createAppointmentRequest struct
 type createAppointmentRequest struct {
-	StoreID   string    `json:"store_id" validate:"required,uuid"`
-	StartTime time.Time `json:"start_time" validate:"required"`
+	StoreID       string    `json:"store_id" validate:"required,uuid"`
+	StartTime     time.Time `json:"start_time" validate:"required"`
+	PaymentMethod string    `json:"payment_method" validate:"required,oneof=cash_on_site card_advance"`
 }
 
 // appointmentResponse struct
@@ -44,6 +45,8 @@ type appointmentResponse struct {
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
 	Status             string    `json:"status"`
+	PaymentMethod      string    `json:"payment_method"`
+	PaymentStatus      string    `json:"payment_status"`
 	CancellationReason string    `json:"cancellation_reason,omitempty"`
 }
 
@@ -108,6 +111,7 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 		request.Context(),
 		req.StoreID,
 		middlewares.GetUserID(request),
+		req.PaymentMethod,
 		req.StartTime,
 	)
 
@@ -117,12 +121,14 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 	}
 
 	if err := RespondJSON(writer, http.StatusCreated, appointmentResponse{
-		ID:        appointment.ID,
-		StoreID:   appointment.StoreID,
-		UserID:    appointment.UserID,
-		StartTime: appointment.StartTime,
-		EndTime:   appointment.EndTime,
-		Status:    appointment.Status,
+		ID:            appointment.ID,
+		StoreID:       appointment.StoreID,
+		UserID:        appointment.UserID,
+		StartTime:     appointment.StartTime,
+		EndTime:       appointment.EndTime,
+		Status:        appointment.Status,
+		PaymentMethod: appointment.PaymentMethod,
+		PaymentStatus: appointment.PaymentStatus,
 	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
@@ -177,6 +183,8 @@ type bookedAppointmentResponse struct {
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
 	Status             string    `json:"status"`
+	PaymentMethod      string    `json:"payment_method"`
+	PaymentStatus      string    `json:"payment_status"`
 	CancellationReason string    `json:"cancellation_reason,omitempty"`
 	ClientUsername     string    `json:"client_username"`
 	ClientEmail        string    `json:"client_email"`
@@ -215,6 +223,8 @@ func (handler *AppointmentHandler) GetBookedAppointments(writer http.ResponseWri
 			StartTime:          appointment.StartTime,
 			EndTime:            appointment.EndTime,
 			Status:             appointment.Status,
+			PaymentMethod:      appointment.PaymentMethod,
+			PaymentStatus:      appointment.PaymentStatus,
 			CancellationReason: appointment.CancellationReason,
 			ClientUsername:     appointment.ClientUsername,
 			ClientEmail:        appointment.ClientEmail,
@@ -249,12 +259,14 @@ type cancelAppointmentRequest struct {
 
 // myAppointmentResponse struct
 type myAppointmentResponse struct {
-	ID        string    `json:"id"`
-	StoreID   string    `json:"store_id"`
-	StoreName string    `json:"store_name"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Status    string    `json:"status"`
+	ID            string    `json:"id"`
+	StoreID       string    `json:"store_id"`
+	StoreName     string    `json:"store_name"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	Status        string    `json:"status"`
+	PaymentMethod string    `json:"payment_method"`
+	PaymentStatus string    `json:"payment_status"`
 }
 
 // GetMyAppointments endpoint (e.g., GET /appointments)
@@ -275,13 +287,73 @@ func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter,
 	response := make([]myAppointmentResponse, 0, len(appointments))
 	for _, appointment := range appointments {
 		response = append(response, myAppointmentResponse{
-			ID:        appointment.ID,
-			StoreID:   appointment.StoreID,
-			StoreName: appointment.StoreName,
-			StartTime: appointment.StartTime,
-			EndTime:   appointment.EndTime,
-			Status:    appointment.Status,
+			ID:            appointment.ID,
+			StoreID:       appointment.StoreID,
+			StoreName:     appointment.StoreName,
+			StartTime:     appointment.StartTime,
+			EndTime:       appointment.EndTime,
+			Status:        appointment.Status,
+			PaymentMethod: appointment.PaymentMethod,
+			PaymentStatus: appointment.PaymentStatus,
 		})
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// activeAppointmentInfo struct
+type activeAppointmentInfo struct {
+	ID            string    `json:"id"`
+	Status        string    `json:"status"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	PaymentMethod string    `json:"payment_method"`
+	PaymentStatus string    `json:"payment_status"`
+}
+
+// activeAppointmentStatusResponse struct
+type activeAppointmentStatusResponse struct {
+	HasAppointment bool                   `json:"has_appointment"`
+	Appointment    *activeAppointmentInfo `json:"appointment"`
+}
+
+// GetActiveAppointmentStatus endpoint (e.g., GET /stores/{storeId}/appointments/me)
+//
+// @Summary Check whether the authenticated user has an active appointment at a store
+// @Description Reports whether the authenticated user currently has a pending or confirmed appointment at the given store, along with its basic data (including payment method/status) if one exists.
+// @Tags appointments
+// @Produce json
+// @Param storeId path string true "Store ID"
+// @Success 200 {object} activeAppointmentStatusResponse
+// @Failure 400 {object} ProblemDetails
+// @Router /stores/{storeId}/appointments/me [get]
+func (handler *AppointmentHandler) GetActiveAppointmentStatus(writer http.ResponseWriter, request *http.Request) {
+	storeID := request.PathValue("storeId")
+
+	appointment, err := handler.usecase.GetActiveAppointmentStatus(request.Context(), storeID, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := activeAppointmentStatusResponse{HasAppointment: appointment != nil}
+	if appointment != nil {
+		response.Appointment = &activeAppointmentInfo{
+			ID:            appointment.ID,
+			Status:        appointment.Status,
+			StartTime:     appointment.StartTime,
+			EndTime:       appointment.EndTime,
+			PaymentMethod: appointment.PaymentMethod,
+			PaymentStatus: appointment.PaymentStatus,
+		}
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
@@ -358,8 +430,104 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,
 		Status:             appointment.Status,
+		PaymentMethod:      appointment.PaymentMethod,
+		PaymentStatus:      appointment.PaymentStatus,
 		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// ConfirmCashPayment endpoint (e.g., PATCH /appointments/{id}/confirm-cash-payment)
+//
+// @Summary Confirm a cash_on_site payment was received
+// @Description Marks a cash_on_site appointment's payment as paid. Only the store's owner may call this, and only while the payment is pending.
+// @Tags appointments
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Success 200 {object} appointmentResponse
+// @Failure 400 {object} ProblemDetails
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/confirm-cash-payment [patch]
+func (handler *AppointmentHandler) ConfirmCashPayment(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	appointment, err := handler.usecase.ConfirmCashPayment(request.Context(), id, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
+		ID:            appointment.ID,
+		StoreID:       appointment.StoreID,
+		UserID:        appointment.UserID,
+		StartTime:     appointment.StartTime,
+		EndTime:       appointment.EndTime,
+		Status:        appointment.Status,
+		PaymentMethod: appointment.PaymentMethod,
+		PaymentStatus: appointment.PaymentStatus,
+	}); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// paymentTransactionResponse struct
+type paymentTransactionResponse struct {
+	ID            string    `json:"id"`
+	Amount        int64     `json:"amount"`
+	Currency      string    `json:"currency"`
+	Status        string    `json:"status"`
+	PaymentMethod string    `json:"payment_method"`
+	FailureReason string    `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ListPaymentTransactions endpoint (e.g., GET /appointments/{id}/transactions)
+//
+// @Summary Get an appointment's payment transaction history
+// @Description Lists every charge attempt (successful or failed) for an appointment, most recent first. Only the client who booked it or the store owner may call this.
+// @Tags appointments
+// @Produce json
+// @Param id path string true "Appointment ID"
+// @Success 200 {array} paymentTransactionResponse
+// @Failure 403 {object} ProblemDetails
+// @Router /appointments/{id}/transactions [get]
+func (handler *AppointmentHandler) ListPaymentTransactions(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	transactions, err := handler.usecase.ListPaymentTransactions(request.Context(), id, middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := make([]paymentTransactionResponse, 0, len(transactions))
+	for _, transaction := range transactions {
+		response = append(response, paymentTransactionResponse{
+			ID:            transaction.ID,
+			Amount:        transaction.Amount,
+			Currency:      transaction.Currency,
+			Status:        transaction.Status,
+			PaymentMethod: transaction.PaymentMethod,
+			FailureReason: transaction.FailureReason,
+			CreatedAt:     transaction.CreatedAt,
+		})
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",
@@ -432,6 +600,8 @@ func (handler *AppointmentHandler) Cancel(writer http.ResponseWriter, request *h
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,
 		Status:             appointment.Status,
+		PaymentMethod:      appointment.PaymentMethod,
+		PaymentStatus:      appointment.PaymentStatus,
 		CancellationReason: appointment.CancellationReason,
 	}); err != nil {
 		handler.logger.ErrorContext(

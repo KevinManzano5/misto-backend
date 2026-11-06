@@ -21,7 +21,7 @@ type StoreRepository struct {
 
 // toDomainStore function
 func toDomainStore(store postgres.Store) *domain.Store {
-	var email, address, phoneNumber string
+	var email, address, phoneNumber, slug string
 
 	if store.Email != nil {
 		email = *store.Email
@@ -32,11 +32,15 @@ func toDomainStore(store postgres.Store) *domain.Store {
 	if store.PhoneNumber != nil {
 		phoneNumber = *store.PhoneNumber
 	}
+	if store.Slug != nil {
+		slug = *store.Slug
+	}
 
 	return &domain.Store{
 		ID:                       store.ID.String(),
 		UserID:                   store.UserID.String(),
 		Name:                     store.Name,
+		Slug:                     slug,
 		Description:              *store.Description,
 		IsActive:                 store.IsActive,
 		AppointmentDuration:      store.AppointmentDuration,
@@ -70,6 +74,7 @@ func (repo *StoreRepository) CreateStore(ctx context.Context, store *domain.Stor
 	result, err := repo.queries.CreateStore(ctx, postgres.CreateStoreParams{
 		UserID:                   userID,
 		Name:                     store.Name,
+		Slug:                     &store.Slug,
 		Description:              &store.Description,
 		AppointmentDuration:      store.AppointmentDuration,
 		Timezone:                 store.Timezone,
@@ -120,6 +125,7 @@ func (repo *StoreRepository) CreateStoreWithSchedules(ctx context.Context, store
 	result, err := txQueries.CreateStore(ctx, postgres.CreateStoreParams{
 		UserID:                   userID,
 		Name:                     store.Name,
+		Slug:                     &store.Slug,
 		Description:              &store.Description,
 		AppointmentDuration:      store.AppointmentDuration,
 		Timezone:                 store.Timezone,
@@ -215,6 +221,21 @@ func (repo *StoreRepository) GetStoreByUserID(ctx context.Context, id string) (*
 	return toDomainStore(result), nil
 }
 
+// GetStoreBySlug method
+func (repo *StoreRepository) GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error) {
+	result, err := repo.queries.GetStoreBySlug(ctx, &slug)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("store with slug %s: %w", slug, domain.ErrNotFound)
+		}
+
+		return nil, fmt.Errorf("getting store %s: %w", slug, err)
+	}
+
+	return toDomainStore(result), nil
+}
+
 // UpdateStore method
 func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Store) error {
 	var storeID pgtype.UUID
@@ -226,6 +247,7 @@ func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Stor
 	_, err := repo.queries.UpdateStore(ctx, postgres.UpdateStoreParams{
 		ID:                       storeID,
 		Name:                     store.Name,
+		Slug:                     &store.Slug,
 		Description:              &store.Description,
 		IsActive:                 store.IsActive,
 		AppointmentDuration:      store.AppointmentDuration,
@@ -263,6 +285,22 @@ func (repo *StoreRepository) DeleteStore(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// ListStoresWithoutSlug method returns every store (any status) whose slug hasn't been
+// backfilled yet, for the one-off slug backfill command.
+func (repo *StoreRepository) ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error) {
+	results, err := repo.queries.ListStoresWithoutSlug(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing stores without slug: %w", err)
+	}
+
+	stores := make([]*domain.Store, 0, len(results))
+	for _, store := range results {
+		stores = append(stores, toDomainStore(store))
+	}
+
+	return stores, nil
 }
 
 // ListStores method

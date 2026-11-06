@@ -37,6 +37,8 @@ func toDomainAppointment(appointment postgres.Appointment) *domain.Appointment {
 		StartTime:          appointment.StartTime.Time.UTC(),
 		EndTime:            appointment.EndTime.Time.UTC(),
 		Status:             appointment.Status,
+		PaymentMethod:      appointment.PaymentMethod,
+		PaymentStatus:      appointment.PaymentStatus,
 		CancellationReason: cancellationReason,
 		CreatedAt:          appointment.CreatedAt.Time.UTC(),
 		UpdatedAt:          appointment.UpdatedAt.Time.UTC(),
@@ -103,11 +105,13 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 	}
 
 	result, err := txQueries.CreateAppointment(ctx, postgres.CreateAppointmentParams{
-		StoreID:   storeID,
-		ClientID:  clientID,
-		StartTime: start,
-		EndTime:   end,
-		Status:    appointment.Status,
+		StoreID:       storeID,
+		ClientID:      clientID,
+		StartTime:     start,
+		EndTime:       end,
+		Status:        appointment.Status,
+		PaymentMethod: appointment.PaymentMethod,
+		PaymentStatus: appointment.PaymentStatus,
 	})
 	if err != nil {
 		return translateAppointmentWriteError(err)
@@ -119,6 +123,8 @@ func (repo *AppointmentRepository) CreateAppointment(ctx context.Context, appoin
 
 	appointment.ID = result.ID.String()
 	appointment.Status = result.Status
+	appointment.PaymentMethod = result.PaymentMethod
+	appointment.PaymentStatus = result.PaymentStatus
 	appointment.StartTime = result.StartTime.Time.UTC()
 	appointment.EndTime = result.EndTime.Time.UTC()
 	appointment.CreatedAt = result.CreatedAt.Time.UTC()
@@ -218,6 +224,8 @@ func (repo *AppointmentRepository) ListAllAppointmentsByStoreWithClient(ctx cont
 				StartTime:          result.StartTime.Time.UTC(),
 				EndTime:            result.EndTime.Time.UTC(),
 				Status:             result.Status,
+				PaymentMethod:      result.PaymentMethod,
+				PaymentStatus:      result.PaymentStatus,
 				CancellationReason: cancellationReason,
 				CreatedAt:          result.CreatedAt.Time.UTC(),
 				UpdatedAt:          result.UpdatedAt.Time.UTC(),
@@ -250,14 +258,16 @@ func (repo *AppointmentRepository) ListAppointmentsByClient(ctx context.Context,
 	for _, result := range results {
 		appointments = append(appointments, &domain.AppointmentWithStore{
 			Appointment: domain.Appointment{
-				ID:        result.ID.String(),
-				StoreID:   result.StoreID.String(),
-				UserID:    result.ClientID.String(),
-				StartTime: result.StartTime.Time.UTC(),
-				EndTime:   result.EndTime.Time.UTC(),
-				Status:    result.Status,
-				CreatedAt: result.CreatedAt.Time.UTC(),
-				UpdatedAt: result.UpdatedAt.Time.UTC(),
+				ID:            result.ID.String(),
+				StoreID:       result.StoreID.String(),
+				UserID:        result.ClientID.String(),
+				StartTime:     result.StartTime.Time.UTC(),
+				EndTime:       result.EndTime.Time.UTC(),
+				Status:        result.Status,
+				PaymentMethod: result.PaymentMethod,
+				PaymentStatus: result.PaymentStatus,
+				CreatedAt:     result.CreatedAt.Time.UTC(),
+				UpdatedAt:     result.UpdatedAt.Time.UTC(),
 			},
 			StoreName: result.StoreName,
 		})
@@ -280,6 +290,34 @@ func (repo *AppointmentRepository) GetAppointmentByID(ctx context.Context, id st
 			return nil, fmt.Errorf("appointment with id %s: %w", id, domain.ErrNotFound)
 		}
 		return nil, fmt.Errorf("getting appointment %s: %w", id, err)
+	}
+
+	return toDomainAppointment(result), nil
+}
+
+// GetActiveAppointmentByStoreAndClient returns the client's pending/confirmed appointment at
+// storeID, if any. A nil, nil result (not domain.ErrNotFound) means no active appointment exists
+// there — an expected, valid outcome for this lookup, not a failure to find a resource assumed
+// to exist.
+func (repo *AppointmentRepository) GetActiveAppointmentByStoreAndClient(ctx context.Context, storeID, clientID string) (*domain.Appointment, error) {
+	var sID, cID pgtype.UUID
+
+	if err := sID.Scan(storeID); err != nil {
+		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+	if err := cID.Scan(clientID); err != nil {
+		return nil, fmt.Errorf("invalid clientID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.GetActiveAppointmentByStoreAndClient(ctx, postgres.GetActiveAppointmentByStoreAndClientParams{
+		StoreID:  sID,
+		ClientID: cID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting active appointment for store %s and client %s: %w", storeID, clientID, err)
 	}
 
 	return toDomainAppointment(result), nil
@@ -326,6 +364,28 @@ func (repo *AppointmentRepository) UpdateAppointmentStatus(ctx context.Context, 
 			return nil, fmt.Errorf("appointment with id %s: %w", id, domain.ErrNotFound)
 		}
 		return nil, fmt.Errorf("updating appointment %s: %w", id, err)
+	}
+
+	return toDomainAppointment(result), nil
+}
+
+// UpdatePaymentStatus method
+func (repo *AppointmentRepository) UpdatePaymentStatus(ctx context.Context, id, paymentStatus string) (*domain.Appointment, error) {
+	var appointmentID pgtype.UUID
+
+	if err := appointmentID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid appointmentID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.UpdateAppointmentPaymentStatus(ctx, postgres.UpdateAppointmentPaymentStatusParams{
+		ID:            appointmentID,
+		PaymentStatus: paymentStatus,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("appointment with id %s: %w", id, domain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("updating appointment payment status %s: %w", id, err)
 	}
 
 	return toDomainAppointment(result), nil
