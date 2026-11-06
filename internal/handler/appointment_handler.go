@@ -35,6 +35,7 @@ func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, ratingUsecase *u
 // createAppointmentRequest struct
 type createAppointmentRequest struct {
 	StoreID       string    `json:"store_id" validate:"required,uuid"`
+	ServiceID     string    `json:"service_id" validate:"required,uuid"`
 	StartTime     time.Time `json:"start_time" validate:"required"`
 	PaymentMethod string    `json:"payment_method" validate:"required,oneof=cash_on_site card_advance"`
 }
@@ -43,6 +44,7 @@ type createAppointmentRequest struct {
 type appointmentResponse struct {
 	ID                 string    `json:"id"`
 	StoreID            string    `json:"store_id"`
+	ServiceID          string    `json:"service_id,omitempty"`
 	UserID             string    `json:"user_id"`
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
@@ -112,6 +114,7 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 	appointment, err := handler.usecase.Create(
 		request.Context(),
 		req.StoreID,
+		req.ServiceID,
 		middlewares.GetUserID(request),
 		req.PaymentMethod,
 		req.StartTime,
@@ -125,6 +128,7 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 	if err := RespondJSON(writer, http.StatusCreated, appointmentResponse{
 		ID:            appointment.ID,
 		StoreID:       appointment.StoreID,
+		ServiceID:     appointment.ServiceID,
 		UserID:        appointment.UserID,
 		StartTime:     appointment.StartTime,
 		EndTime:       appointment.EndTime,
@@ -145,24 +149,26 @@ func (handler *AppointmentHandler) Create(writer http.ResponseWriter, request *h
 // GetAvailableSlots endpoint (e.g., GET /stores/{storeId}/availability)
 //
 // @Summary Get store availability
-// @Description List the available start times for a store on a given date, based on its default appointment duration
+// @Description List the available start times for a store on a given date and service, based on that service's duration
 // @Tags appointments
 // @Produce json
 // @Param storeId path string true "Store ID"
+// @Param service_id query string true "Service ID"
 // @Param date query string true "Date (YYYY-MM-DD)"
 // @Success 200 {array} string
 // @Failure 400 {object} ProblemDetails
 // @Router /stores/{storeId}/availability [get]
 func (handler *AppointmentHandler) GetAvailableSlots(writer http.ResponseWriter, request *http.Request) {
 	storeID := request.PathValue("storeId")
+	serviceID := request.URL.Query().Get("service_id")
 	dateStr := request.URL.Query().Get("date")
 
-	if dateStr == "" {
+	if serviceID == "" || dateStr == "" {
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
 
-	slots, err := handler.usecase.GetAvailableSlots(request.Context(), storeID, dateStr)
+	slots, err := handler.usecase.GetAvailableSlots(request.Context(), storeID, serviceID, dateStr)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -443,6 +449,7 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
 		ID:                 appointment.ID,
 		StoreID:            appointment.StoreID,
+		ServiceID:          appointment.ServiceID,
 		UserID:             appointment.UserID,
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,
@@ -484,6 +491,7 @@ func (handler *AppointmentHandler) ConfirmCashPayment(writer http.ResponseWriter
 	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
 		ID:            appointment.ID,
 		StoreID:       appointment.StoreID,
+		ServiceID:     appointment.ServiceID,
 		UserID:        appointment.UserID,
 		StartTime:     appointment.StartTime,
 		EndTime:       appointment.EndTime,
@@ -613,6 +621,7 @@ func (handler *AppointmentHandler) Cancel(writer http.ResponseWriter, request *h
 	if err := RespondJSON(writer, http.StatusOK, appointmentResponse{
 		ID:                 appointment.ID,
 		StoreID:            appointment.StoreID,
+		ServiceID:          appointment.ServiceID,
 		UserID:             appointment.UserID,
 		StartTime:          appointment.StartTime,
 		EndTime:            appointment.EndTime,

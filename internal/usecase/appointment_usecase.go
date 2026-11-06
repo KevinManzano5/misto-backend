@@ -40,6 +40,12 @@ type AppointmentStoreRepository interface {
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 }
 
+// AppointmentStoreServiceRepository interface (narrowed to what AppointmentUseCase needs from a
+// store service)
+type AppointmentStoreServiceRepository interface {
+	GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error)
+}
+
 // PaymentTransactionRepository interface (narrowed to what AppointmentUseCase needs to record and
 // list charge attempts)
 type PaymentTransactionRepository interface {
@@ -52,21 +58,45 @@ type AppointmentUseCase struct {
 	repo                   AppointmentRepository
 	scheduleRepo           StoreScheduleRepository
 	storeRepo              AppointmentStoreRepository
+	storeServiceRepo       AppointmentStoreServiceRepository
 	paymentProcessor       PaymentProcessor
 	paymentTransactionRepo PaymentTransactionRepository
 	log                    *slog.Logger
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
 	return &AppointmentUseCase{
 		repo:                   repo,
 		scheduleRepo:           scheduleRepo,
 		storeRepo:              storeRepo,
+		storeServiceRepo:       storeServiceRepo,
 		paymentProcessor:       paymentProcessor,
 		paymentTransactionRepo: paymentTransactionRepo,
 		log:                    log,
 	}
+}
+
+// resolveService loads serviceID and verifies it belongs to storeID and is currently active, so
+// slot/appointment duration always reflects a real, currently-offered service of this store.
+func (usecase *AppointmentUseCase) resolveService(ctx context.Context, storeID, serviceID string) (*domain.StoreService, error) {
+	service, err := usecase.storeServiceRepo.GetStoreServiceByID(ctx, serviceID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, fmt.Errorf("%w: service not found", domain.ErrInvalidInput)
+		}
+		return nil, fmt.Errorf("getting store service: %w", err)
+	}
+
+	if service.StoreID != storeID {
+		return nil, fmt.Errorf("%w: service does not belong to this store", domain.ErrInvalidInput)
+	}
+
+	if !service.IsActive {
+		return nil, fmt.Errorf("%w: service is not currently offered", domain.ErrInvalidInput)
+	}
+
+	return service, nil
 }
 
 // recordPaymentTransaction best-effort-records the outcome of a Charge call as a new, immutable
@@ -94,7 +124,7 @@ func storeLocation(store *domain.Store) *time.Location {
 }
 
 // Create method
-func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, paymentMethod string, startTime time.Time) (*domain.Appointment, error) {
+func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceID, userID, paymentMethod string, startTime time.Time) (*domain.Appointment, error) {
 	if paymentMethod != domain.PaymentMethodCashOnSite && paymentMethod != domain.PaymentMethodCardAdvance {
 		return nil, fmt.Errorf("%w: payment method must be %q or %q", domain.ErrInvalidInput, domain.PaymentMethodCashOnSite, domain.PaymentMethodCardAdvance)
 	}
@@ -108,11 +138,16 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, 
 		return nil, fmt.Errorf("getting store: %w", err)
 	}
 
+	service, err := usecase.resolveService(ctx, storeID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+
 	if !store.AllowSameDayAppointments && isSameLocalDay(startTime, time.Now(), storeLocation(store)) {
 		return nil, fmt.Errorf("%w: this store does not accept same-day appointments", domain.ErrInvalidInput)
 	}
 
-	endTime := startTime.Add(time.Duration(store.AppointmentDuration) * time.Minute)
+	endTime := startTime.Add(time.Duration(service.DurationMinutes) * time.Minute)
 
 	if err := usecase.validateWithinStoreSchedule(ctx, store, startTime, endTime); err != nil {
 		return nil, err
@@ -129,7 +164,7 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, userID, 
 	// (see UpdateStatus).
 	paymentStatus := domain.PaymentStatusPending
 
-	appointment := domain.NewAppointment(storeID, userID, status, paymentMethod, paymentStatus, startTime, endTime)
+	appointment := domain.NewAppointment(storeID, serviceID, userID, status, paymentMethod, paymentStatus, startTime, endTime)
 
 	// Auto-confirming stores charge the card immediately; a store that reviews appointments
 	// manually only charges when it confirms (see UpdateStatus).
@@ -289,10 +324,15 @@ type daySchedule struct {
 // day of week, and the appointments already booked that day. isOpen is false (with zero-value
 // times) when the store has no schedule for that day or is explicitly closed, which callers
 // treat as "no availability" rather than an error.
-func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, storeID, dateStr string) (*daySchedule, error) {
+func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, storeID, serviceID, dateStr string) (*daySchedule, error) {
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	service, err := usecase.resolveService(ctx, storeID, serviceID)
+	if err != nil {
+		return nil, err
 	}
 
 	loc := storeLocation(store)
@@ -310,7 +350,7 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	}
 
 	if !store.AllowSameDayAppointments && isSameLocalDay(targetDate, now, loc) {
-		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
 	}
 
 	dayOfWeek := int32(targetDate.Weekday())
@@ -318,13 +358,13 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	if err != nil {
 		// If there is no schedule in the DB for that day, we assume it is closed.
 		if errors.Is(err, domain.ErrNotFound) {
-			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
+			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
 		}
 		return nil, fmt.Errorf("getting store schedule: %w", err)
 	}
 
 	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
-		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: store.AppointmentDuration}, nil
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
 	}
 
 	openTime, err := parseScheduleClockTime(targetDate, schedule.OpenTime)
@@ -348,7 +388,7 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	return &daySchedule{
 		location:        loc,
 		targetDate:      targetDate,
-		durationMinutes: store.AppointmentDuration,
+		durationMinutes: service.DurationMinutes,
 		openTime:        openTime,
 		closeTime:       closeTime,
 		isOpen:          true,
@@ -399,8 +439,8 @@ func (day *daySchedule) availableSlots() []string {
 }
 
 // GetAvailableSlots method en AppointmentUseCase
-func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeID, dateStr string) ([]string, error) {
-	day, err := usecase.resolveDaySchedule(ctx, storeID, dateStr)
+func (usecase *AppointmentUseCase) GetAvailableSlots(ctx context.Context, storeID, serviceID, dateStr string) ([]string, error) {
+	day, err := usecase.resolveDaySchedule(ctx, storeID, serviceID, dateStr)
 	if err != nil {
 		return nil, err
 	}

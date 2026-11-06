@@ -20,6 +20,7 @@ type Appointment struct {
 	CancellationReason *string            `json:"cancellation_reason"`
 	PaymentMethod      string             `json:"payment_method"`
 	PaymentStatus      string             `json:"payment_status"`
+	ServiceID          pgtype.UUID        `json:"service_id"`
 }
 
 type PaymentTransaction struct {
@@ -87,6 +88,19 @@ type StoreSchedule struct {
 	IsClosed  bool               `json:"is_closed"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StoreService struct {
+	ID              pgtype.UUID        `json:"id"`
+	StoreID         pgtype.UUID        `json:"store_id"`
+	CategoryID      pgtype.UUID        `json:"category_id"`
+	Name            string             `json:"name"`
+	Description     *string            `json:"description"`
+	DurationMinutes int32              `json:"duration_minutes"`
+	Price           pgtype.Numeric     `json:"price"`
+	IsActive        bool               `json:"is_active"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

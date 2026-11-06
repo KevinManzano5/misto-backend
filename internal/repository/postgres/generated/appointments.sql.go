@@ -58,6 +58,7 @@ func (q *Queries) CheckClientHasActiveAppointment(ctx context.Context, arg Check
 const createAppointment = `-- name: CreateAppointment :one
 INSERT INTO appointments (
     store_id,
+    service_id,
     client_id,
     start_time,
     end_time,
@@ -65,13 +66,14 @@ INSERT INTO appointments (
     payment_method,
     payment_status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id
 `
 
 type CreateAppointmentParams struct {
 	StoreID       pgtype.UUID        `json:"store_id"`
+	ServiceID     pgtype.UUID        `json:"service_id"`
 	ClientID      pgtype.UUID        `json:"client_id"`
 	StartTime     pgtype.Timestamptz `json:"start_time"`
 	EndTime       pgtype.Timestamptz `json:"end_time"`
@@ -83,6 +85,7 @@ type CreateAppointmentParams struct {
 func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error) {
 	row := q.db.QueryRow(ctx, createAppointment,
 		arg.StoreID,
+		arg.ServiceID,
 		arg.ClientID,
 		arg.StartTime,
 		arg.EndTime,
@@ -103,6 +106,7 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 		&i.CancellationReason,
 		&i.PaymentMethod,
 		&i.PaymentStatus,
+		&i.ServiceID,
 	)
 	return i, err
 }
@@ -117,7 +121,7 @@ SET
     updated_at = CURRENT_TIMESTAMP
 WHERE status IN ('pending', 'confirmed')
   AND end_time < $1
-RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id
 `
 
 // Moves pending/confirmed appointments whose end_time has already passed to a terminal status:
@@ -144,6 +148,7 @@ func (q *Queries) ExpireOverdueAppointments(ctx context.Context, before pgtype.T
 			&i.CancellationReason,
 			&i.PaymentMethod,
 			&i.PaymentStatus,
+			&i.ServiceID,
 		); err != nil {
 			return nil, err
 		}
@@ -156,7 +161,7 @@ func (q *Queries) ExpireOverdueAppointments(ctx context.Context, before pgtype.T
 }
 
 const getActiveAppointmentByStoreAndClient = `-- name: GetActiveAppointmentByStoreAndClient :one
-SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status FROM appointments
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id FROM appointments
 WHERE store_id = $1
   AND client_id = $2
   AND status IN ('pending', 'confirmed')
@@ -185,12 +190,13 @@ func (q *Queries) GetActiveAppointmentByStoreAndClient(ctx context.Context, arg 
 		&i.CancellationReason,
 		&i.PaymentMethod,
 		&i.PaymentStatus,
+		&i.ServiceID,
 	)
 	return i, err
 }
 
 const getAppointmentByID = `-- name: GetAppointmentByID :one
-SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status FROM appointments
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id FROM appointments
 WHERE id = $1
 LIMIT 1
 `
@@ -210,6 +216,7 @@ func (q *Queries) GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appoi
 		&i.CancellationReason,
 		&i.PaymentMethod,
 		&i.PaymentStatus,
+		&i.ServiceID,
 	)
 	return i, err
 }
@@ -218,6 +225,7 @@ const listAllAppointmentsByStoreWithClient = `-- name: ListAllAppointmentsByStor
 SELECT
     a.id,
     a.store_id,
+    a.service_id,
     a.client_id,
     a.start_time,
     a.end_time,
@@ -248,6 +256,7 @@ type ListAllAppointmentsByStoreWithClientParams struct {
 type ListAllAppointmentsByStoreWithClientRow struct {
 	ID                 pgtype.UUID        `json:"id"`
 	StoreID            pgtype.UUID        `json:"store_id"`
+	ServiceID          pgtype.UUID        `json:"service_id"`
 	ClientID           pgtype.UUID        `json:"client_id"`
 	StartTime          pgtype.Timestamptz `json:"start_time"`
 	EndTime            pgtype.Timestamptz `json:"end_time"`
@@ -278,6 +287,7 @@ func (q *Queries) ListAllAppointmentsByStoreWithClient(ctx context.Context, arg 
 		if err := rows.Scan(
 			&i.ID,
 			&i.StoreID,
+			&i.ServiceID,
 			&i.ClientID,
 			&i.StartTime,
 			&i.EndTime,
@@ -306,6 +316,7 @@ const listAppointmentsByClient = `-- name: ListAppointmentsByClient :many
 SELECT
     a.id,
     a.store_id,
+    a.service_id,
     a.client_id,
     a.start_time,
     a.end_time,
@@ -324,6 +335,7 @@ ORDER BY a.start_time DESC
 type ListAppointmentsByClientRow struct {
 	ID            pgtype.UUID        `json:"id"`
 	StoreID       pgtype.UUID        `json:"store_id"`
+	ServiceID     pgtype.UUID        `json:"service_id"`
 	ClientID      pgtype.UUID        `json:"client_id"`
 	StartTime     pgtype.Timestamptz `json:"start_time"`
 	EndTime       pgtype.Timestamptz `json:"end_time"`
@@ -349,6 +361,7 @@ func (q *Queries) ListAppointmentsByClient(ctx context.Context, clientID pgtype.
 		if err := rows.Scan(
 			&i.ID,
 			&i.StoreID,
+			&i.ServiceID,
 			&i.ClientID,
 			&i.StartTime,
 			&i.EndTime,
@@ -370,7 +383,7 @@ func (q *Queries) ListAppointmentsByClient(ctx context.Context, clientID pgtype.
 }
 
 const listAppointmentsByStoreDate = `-- name: ListAppointmentsByStoreDate :many
-SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status FROM appointments
+SELECT id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id FROM appointments
 WHERE store_id = $1
   AND start_time >= $2
   AND start_time <= $3
@@ -406,6 +419,7 @@ func (q *Queries) ListAppointmentsByStoreDate(ctx context.Context, arg ListAppoi
 			&i.CancellationReason,
 			&i.PaymentMethod,
 			&i.PaymentStatus,
+			&i.ServiceID,
 		); err != nil {
 			return nil, err
 		}
@@ -423,7 +437,7 @@ SET
     payment_status = $2,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id
 `
 
 type UpdateAppointmentPaymentStatusParams struct {
@@ -446,6 +460,7 @@ func (q *Queries) UpdateAppointmentPaymentStatus(ctx context.Context, arg Update
 		&i.CancellationReason,
 		&i.PaymentMethod,
 		&i.PaymentStatus,
+		&i.ServiceID,
 	)
 	return i, err
 }
@@ -457,7 +472,7 @@ SET
     cancellation_reason = $3,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status
+RETURNING id, store_id, client_id, start_time, end_time, status, created_at, updated_at, cancellation_reason, payment_method, payment_status, service_id
 `
 
 type UpdateAppointmentStatusParams struct {
@@ -481,6 +496,7 @@ func (q *Queries) UpdateAppointmentStatus(ctx context.Context, arg UpdateAppoint
 		&i.CancellationReason,
 		&i.PaymentMethod,
 		&i.PaymentStatus,
+		&i.ServiceID,
 	)
 	return i, err
 }
