@@ -85,6 +85,8 @@ type storeResponse struct {
 	PhoneNumber              string                  `json:"phone_number"`
 	Schedules                []storeScheduleResponse `json:"schedules"`
 	Categories               []storeCategoryResponse `json:"categories"`
+	AverageRating            float64                 `json:"average_rating"`
+	RatingCount              int64                   `json:"rating_count"`
 	CreatedAt                time.Time               `json:"created_at"`
 	UpdatedAt                time.Time               `json:"updated_at"`
 }
@@ -153,9 +155,10 @@ func toStoreCategoryResponse(category *domain.StoreCategory) storeCategoryRespon
 	}
 }
 
-// buildStoreResponse composes the full store response, embedding its weekly schedules and
-// assigned categories so callers don't need separate requests to see them.
-func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store) (storeResponse, error) {
+// buildStoreResponse composes the full store response, embedding its weekly schedules, assigned
+// categories, and rating summary so callers don't need separate requests to see them. ratingSummary
+// may be nil, in which case the response's rating fields are left at their zero value.
+func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store, ratingSummary *domain.StoreRatingSummary) (storeResponse, error) {
 	schedules, err := handler.usecase.ListSchedules(ctx, store.ID)
 	if err != nil {
 		return storeResponse{}, fmt.Errorf("listing store schedules: %w", err)
@@ -176,6 +179,13 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		categoryResponses = append(categoryResponses, toStoreCategoryResponse(category))
 	}
 
+	var averageRating float64
+	var ratingCount int64
+	if ratingSummary != nil {
+		averageRating = ratingSummary.AverageScore
+		ratingCount = ratingSummary.RatingCount
+	}
+
 	return storeResponse{
 		ID:                       store.ID,
 		UserID:                   store.UserID,
@@ -192,9 +202,23 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		PhoneNumber:              store.PhoneNumber,
 		Schedules:                scheduleResponses,
 		Categories:               categoryResponses,
+		AverageRating:            averageRating,
+		RatingCount:              ratingCount,
 		CreatedAt:                store.CreatedAt,
 		UpdatedAt:                store.UpdatedAt,
 	}, nil
+}
+
+// buildStoreResponseWithRating fetches store's rating summary and composes its full response. Used
+// by every single-store endpoint (Create, Get, Update); ListStores fetches summaries in bulk
+// instead to avoid N+1 queries.
+func (handler *StoreHandler) buildStoreResponseWithRating(ctx context.Context, store *domain.Store) (storeResponse, error) {
+	summary, err := handler.usecase.GetRatingSummary(ctx, store.ID)
+	if err != nil {
+		return storeResponse{}, fmt.Errorf("getting store rating summary: %w", err)
+	}
+
+	return handler.buildStoreResponse(ctx, store, summary)
 }
 
 // Create endpoint
@@ -262,7 +286,7 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	response, err := handler.buildStoreResponse(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -299,7 +323,7 @@ func (handler *StoreHandler) GetStoreByID(writer http.ResponseWriter, request *h
 		return
 	}
 
-	response, err := handler.buildStoreResponse(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -325,7 +349,7 @@ func (handler *StoreHandler) GetStoreByUserID(writer http.ResponseWriter, reques
 		return
 	}
 
-	response, err := handler.buildStoreResponse(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -400,7 +424,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	response, err := handler.buildStoreResponse(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -445,9 +469,20 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		return
 	}
 
+	storeIDs := make([]string, 0, len(stores))
+	for _, store := range stores {
+		storeIDs = append(storeIDs, store.ID)
+	}
+
+	ratingSummaries, err := handler.usecase.ListRatingSummaries(request.Context(), storeIDs)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
 	response := make([]storeResponse, 0, len(stores))
 	for _, store := range stores {
-		storeWithSchedules, err := handler.buildStoreResponse(request.Context(), store)
+		storeWithSchedules, err := handler.buildStoreResponse(request.Context(), store, ratingSummaries[store.ID])
 		if err != nil {
 			RespondError(writer, request, handler.logger, err)
 			return

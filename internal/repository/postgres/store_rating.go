@@ -217,6 +217,61 @@ func (repo *StoreRatingRepository) GetStoreRatingSummaryByStore(ctx context.Cont
 	}, nil
 }
 
+// ListRatedAppointmentIDs method returns the subset of appointmentIDs that already have a
+// rating, in a single query. An appointmentID with no rating is simply absent from the result.
+func (repo *StoreRatingRepository) ListRatedAppointmentIDs(ctx context.Context, appointmentIDs []string) ([]string, error) {
+	ids := make([]pgtype.UUID, 0, len(appointmentIDs))
+	for _, appointmentID := range appointmentIDs {
+		var id pgtype.UUID
+		if err := id.Scan(appointmentID); err != nil {
+			return nil, fmt.Errorf("invalid appointmentID %q: %w", appointmentID, domain.ErrInvalidInput)
+		}
+		ids = append(ids, id)
+	}
+
+	results, err := repo.queries.ListRatedAppointmentIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("listing rated appointment IDs: %w", err)
+	}
+
+	rated := make([]string, 0, len(results))
+	for _, result := range results {
+		rated = append(rated, result.String())
+	}
+
+	return rated, nil
+}
+
+// GetStoreRatingSummariesByStores method returns the average score and rating count for each of
+// storeIDs that has at least one rating, in a single query. A storeID with zero ratings is
+// simply absent from the result; the caller treats a missing entry as a zero summary.
+func (repo *StoreRatingRepository) GetStoreRatingSummariesByStores(ctx context.Context, storeIDs []string) ([]*domain.StoreRatingSummary, error) {
+	ids := make([]pgtype.UUID, 0, len(storeIDs))
+	for _, storeID := range storeIDs {
+		var id pgtype.UUID
+		if err := id.Scan(storeID); err != nil {
+			return nil, fmt.Errorf("invalid storeID %q: %w", storeID, domain.ErrInvalidInput)
+		}
+		ids = append(ids, id)
+	}
+
+	results, err := repo.queries.GetStoreRatingSummariesByStores(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("getting store rating summaries: %w", err)
+	}
+
+	summaries := make([]*domain.StoreRatingSummary, 0, len(results))
+	for _, result := range results {
+		summaries = append(summaries, &domain.StoreRatingSummary{
+			StoreID:      result.StoreID.String(),
+			AverageScore: result.AverageScore,
+			RatingCount:  result.RatingCount,
+		})
+	}
+
+	return summaries, nil
+}
+
 // UpdateStoreRating method
 func (repo *StoreRatingRepository) UpdateStoreRating(ctx context.Context, id string, score int32, comment string) (*domain.StoreRating, error) {
 	var ratingID pgtype.UUID

@@ -17,7 +17,6 @@ type fakeStoreRatingRepository struct {
 	getStoreRatingByAppointmentIDFunc func(ctx context.Context, appointmentID string) (*domain.StoreRating, error)
 	listStoreRatingsByStoreFunc       func(ctx context.Context, storeID string, limit, offset int32) ([]*domain.StoreRatingWithClient, error)
 	countStoreRatingsByStoreFunc      func(ctx context.Context, storeID string) (int64, error)
-	getStoreRatingSummaryByStoreFunc  func(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error)
 	updateStoreRatingFunc             func(ctx context.Context, id string, score int32, comment string) (*domain.StoreRating, error)
 	deleteStoreRatingFunc             func(ctx context.Context, id string) error
 }
@@ -42,8 +41,8 @@ func (f *fakeStoreRatingRepository) CountStoreRatingsByStore(ctx context.Context
 	return f.countStoreRatingsByStoreFunc(ctx, storeID)
 }
 
-func (f *fakeStoreRatingRepository) GetStoreRatingSummaryByStore(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error) {
-	return f.getStoreRatingSummaryByStoreFunc(ctx, storeID)
+func (f *fakeStoreRatingRepository) ListRatedAppointmentIDs(ctx context.Context, appointmentIDs []string) ([]string, error) {
+	panic("not implemented")
 }
 
 func (f *fakeStoreRatingRepository) UpdateStoreRating(ctx context.Context, id string, score int32, comment string) (*domain.StoreRating, error) {
@@ -261,23 +260,5 @@ func TestListByStore_ReturnsFromRepository(t *testing.T) {
 	}
 	if total != 1 || len(got) != 1 || got[0].ID != "rating-1" {
 		t.Fatalf("unexpected result: got=%+v total=%d", got, total)
-	}
-}
-
-func TestGetSummaryByStore_ReturnsFromRepository(t *testing.T) {
-	want := &domain.StoreRatingSummary{StoreID: "store-1", AverageScore: 4.5, RatingCount: 2}
-	repo := &fakeStoreRatingRepository{
-		getStoreRatingSummaryByStoreFunc: func(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error) {
-			return want, nil
-		},
-	}
-	uc := NewStoreRatingUseCase(repo, &fakeStoreRatingAppointmentRepository{})
-
-	got, err := uc.GetSummaryByStore(context.Background(), "store-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.AverageScore != 4.5 || got.RatingCount != 2 {
-		t.Fatalf("unexpected summary: %+v", got)
 	}
 }
