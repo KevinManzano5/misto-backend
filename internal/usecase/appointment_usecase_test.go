@@ -640,6 +640,39 @@ func TestCreate_CardAdvance_ManualConfirm_DoesNotChargeYet(t *testing.T) {
 	}
 }
 
+func TestCreate_RejectsWithinServiceMinLeadTime(t *testing.T) {
+	storeRepo, scheduleRepo, _ := newCreateTestStores(true)
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 10, IsActive: true, MinLeadTimeMinutes: 60}, nil
+		},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(30*time.Minute))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_AllowsAfterServiceMinLeadTime(t *testing.T) {
+	storeRepo, scheduleRepo, _ := newCreateTestStores(true)
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 10, IsActive: true, MinLeadTimeMinutes: 60}, nil
+		},
+	}
+	repo := &fakeAppointmentRepository{
+		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
+	}
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(90*time.Minute))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGetAvailableSlots_RejectsServiceNotBelongingToStore(t *testing.T) {
 	storeRepo, scheduleRepo, _ := newCreateTestStores(true)
 	serviceRepo := &fakeAppointmentStoreServiceRepository{
@@ -699,6 +732,56 @@ func TestGetAvailableSlots_SpacingReflectsServiceDuration(t *testing.T) {
 	}
 	if slots[1] != "01:00" {
 		t.Fatalf("expected slots spaced by the service's 60-minute duration (second slot at 01:00), got %v", slots)
+	}
+}
+
+func TestGetAvailableSlots_ExcludesSlotsWithinServiceMinLeadTime(t *testing.T) {
+	// Lead-time filtering only kicks in for "today"; close to the UTC day boundary the lead
+	// time can roll into tomorrow, which this test's string-based cutoff check doesn't model.
+	if time.Now().UTC().Hour() >= 22 {
+		t.Skip("skipping near the UTC day boundary to avoid a flaky cutoff comparison")
+	}
+
+	storeRepo, scheduleRepo, _ := newCreateTestStores(true)
+	withLeadTime := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 10, IsActive: true, MinLeadTimeMinutes: 60}, nil
+		},
+	}
+	noLeadTime := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 10, IsActive: true}, nil
+		},
+	}
+	repo := &fakeAppointmentRepository{
+		listAppointmentsByStoreDateFunc: func(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error) {
+			return nil, nil
+		},
+	}
+
+	dateStr := time.Now().UTC().Format("2006-01-02")
+
+	ucWithLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, withLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	ucNoLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, noLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	slotsWithLeadTime, err := ucWithLeadTime.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	slotsNoLeadTime, err := ucNoLeadTime.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(slotsWithLeadTime) >= len(slotsNoLeadTime) {
+		t.Fatalf("expected a 60-minute lead time to exclude at least one near-term slot; with=%v without=%v", slotsWithLeadTime, slotsNoLeadTime)
+	}
+
+	cutoff := time.Now().UTC().Add(60 * time.Minute).Format("15:04")
+	for _, slot := range slotsWithLeadTime {
+		if slot < cutoff {
+			t.Fatalf("expected no slot before the lead-time cutoff %q, got %q", cutoff, slot)
+		}
 	}
 }
 

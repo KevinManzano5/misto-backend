@@ -91,16 +91,17 @@ type StoreSchedule struct {
 }
 
 type StoreService struct {
-	ID              pgtype.UUID        `json:"id"`
-	StoreID         pgtype.UUID        `json:"store_id"`
-	CategoryID      pgtype.UUID        `json:"category_id"`
-	Name            string             `json:"name"`
-	Description     *string            `json:"description"`
-	DurationMinutes int32              `json:"duration_minutes"`
-	Price           pgtype.Numeric     `json:"price"`
-	IsActive        bool               `json:"is_active"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	CategoryID         pgtype.UUID        `json:"category_id"`
+	Name               string             `json:"name"`
+	Description        *string            `json:"description"`
+	DurationMinutes    int32              `json:"duration_minutes"`
+	Price              pgtype.Numeric     `json:"price"`
+	IsActive           bool               `json:"is_active"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	MinLeadTimeMinutes int32              `json:"min_lead_time_minutes"`
 }
 
 type User struct {

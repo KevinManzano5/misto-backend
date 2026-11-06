@@ -41,16 +41,17 @@ func toDomainStoreService(service postgres.StoreService) (*domain.StoreService, 
 	}
 
 	return &domain.StoreService{
-		ID:              service.ID.String(),
-		StoreID:         service.StoreID.String(),
-		CategoryID:      service.CategoryID.String(),
-		Name:            service.Name,
-		Description:     description,
-		DurationMinutes: service.DurationMinutes,
-		Price:           price.Float64,
-		IsActive:        service.IsActive,
-		CreatedAt:       service.CreatedAt.Time.UTC(),
-		UpdatedAt:       service.UpdatedAt.Time.UTC(),
+		ID:                 service.ID.String(),
+		StoreID:            service.StoreID.String(),
+		CategoryID:         service.CategoryID.String(),
+		Name:               service.Name,
+		Description:        description,
+		DurationMinutes:    service.DurationMinutes,
+		Price:              price.Float64,
+		IsActive:           service.IsActive,
+		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
+		CreatedAt:          service.CreatedAt.Time.UTC(),
+		UpdatedAt:          service.UpdatedAt.Time.UTC(),
 	}, nil
 }
 
@@ -98,12 +99,13 @@ func (repo *StoreServiceRepository) CreateStoreService(ctx context.Context, serv
 	}
 
 	result, err := repo.queries.CreateStoreService(ctx, postgres.CreateStoreServiceParams{
-		StoreID:         storeID,
-		CategoryID:      categoryID,
-		Name:            service.Name,
-		Description:     description,
-		DurationMinutes: service.DurationMinutes,
-		Price:           price,
+		StoreID:            storeID,
+		CategoryID:         categoryID,
+		Name:               service.Name,
+		Description:        description,
+		DurationMinutes:    service.DurationMinutes,
+		Price:              price,
+		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 	})
 	if err != nil {
 		return translateStoreServiceWriteError(err)
@@ -207,13 +209,14 @@ func (repo *StoreServiceRepository) UpdateStoreService(ctx context.Context, serv
 	}
 
 	result, err := repo.queries.UpdateStoreService(ctx, postgres.UpdateStoreServiceParams{
-		ID:              serviceID,
-		CategoryID:      categoryID,
-		Name:            service.Name,
-		Description:     description,
-		DurationMinutes: service.DurationMinutes,
-		Price:           price,
-		IsActive:        service.IsActive,
+		ID:                 serviceID,
+		CategoryID:         categoryID,
+		Name:               service.Name,
+		Description:        description,
+		DurationMinutes:    service.DurationMinutes,
+		Price:              price,
+		IsActive:           service.IsActive,
+		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

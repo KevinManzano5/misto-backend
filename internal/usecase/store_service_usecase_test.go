@@ -81,7 +81,7 @@ func assignedCategoryRepo() *fakeStoreServiceCategoryRepository {
 func TestCreate_RejectsNonOwner(t *testing.T) {
 	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo())
 
-	_, err := uc.Create(context.Background(), "store-1", "someone-else", "cat-1", "Haircut", "", 30, 10)
+	_, err := uc.Create(context.Background(), "store-1", "someone-else", "cat-1", "Haircut", "", 30, 10, 0)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCreate_RejectsNonOwner(t *testing.T) {
 func TestCreate_RejectsCategoryNotAssignedToStore(t *testing.T) {
 	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo())
 
-	_, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-unassigned", "Haircut", "", 30, 10)
+	_, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-unassigned", "Haircut", "", 30, 10, 0)
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCreate_Succeeds(t *testing.T) {
 
 	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
 
-	service, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-1", "Haircut", "A classic haircut", 30, 10)
+	service, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-1", "Haircut", "A classic haircut", 30, 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestUpdate_RejectsNonOwner(t *testing.T) {
 
 	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
 
-	_, err := uc.Update(context.Background(), "service-1", "someone-else", nil, nil, nil, nil, nil, nil)
+	_, err := uc.Update(context.Background(), "service-1", "someone-else", nil, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
@@ -146,7 +146,7 @@ func TestUpdate_RejectsCategoryNotAssignedToStore(t *testing.T) {
 	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
 
 	unassigned := "cat-unassigned"
-	_, err := uc.Update(context.Background(), "service-1", "owner-1", &unassigned, nil, nil, nil, nil, nil)
+	_, err := uc.Update(context.Background(), "service-1", "owner-1", &unassigned, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
@@ -165,7 +165,7 @@ func TestUpdate_Succeeds(t *testing.T) {
 	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
 
 	newName := "Fade Haircut"
-	updated, err := uc.Update(context.Background(), "service-1", "owner-1", nil, &newName, nil, nil, nil, nil)
+	updated, err := uc.Update(context.Background(), "service-1", "owner-1", nil, &newName, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
