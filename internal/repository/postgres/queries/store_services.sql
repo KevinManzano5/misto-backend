@@ -1,6 +1,6 @@
 -- name: CreateStoreService :one
-INSERT INTO store_services (store_id, category_id, name, description, duration_minutes, price)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO store_services (store_id, category_id, name, description, duration_minutes, price, min_lead_time_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetStoreServiceByID :one
@@ -21,13 +21,14 @@ ORDER BY name;
 -- name: UpdateStoreService :one
 UPDATE store_services
 SET
-    category_id      = $2,
-    name             = $3,
-    description      = $4,
-    duration_minutes = $5,
-    price            = $6,
-    is_active        = $7,
-    updated_at       = CURRENT_TIMESTAMP
+    category_id            = $2,
+    name                   = $3,
+    description            = $4,
+    duration_minutes       = $5,
+    price                  = $6,
+    is_active              = $7,
+    min_lead_time_minutes  = $8,
+    updated_at             = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING *;
 

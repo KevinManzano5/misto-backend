@@ -76,7 +76,7 @@ func (usecase *StoreServiceUseCase) requireAssignedCategory(ctx context.Context,
 
 // Create creates a new service for a store. Only the store's owner may call this, and
 // categoryID must be one of the categories currently assigned to the store.
-func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, requesterUserID, categoryID, name, description string, durationMinutes int32, price float64) (*domain.StoreService, error) {
+func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, requesterUserID, categoryID, name, description string, durationMinutes int32, price float64, minLeadTimeMinutes int32) (*domain.StoreService, error) {
 	if _, err := usecase.requireOwnedStore(ctx, storeID, requesterUserID); err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, request
 		return nil, err
 	}
 
-	service := domain.NewStoreService(storeID, categoryID, name, description, durationMinutes, price)
+	service := domain.NewStoreService(storeID, categoryID, name, description, durationMinutes, price, minLeadTimeMinutes)
 	if !service.IsValid() {
 		return nil, fmt.Errorf("%w: invalid store service data", domain.ErrInvalidInput)
 	}
@@ -99,7 +99,7 @@ func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, request
 
 // Update applies partial changes to an existing service. Only the store's owner may call this,
 // and a new categoryID (if given) must be one of the categories currently assigned to the store.
-func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID, requesterUserID string, categoryID, name, description *string, durationMinutes *int32, price *float64, isActive *bool) (*domain.StoreService, error) {
+func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID, requesterUserID string, categoryID, name, description *string, durationMinutes *int32, price *float64, isActive *bool, minLeadTimeMinutes *int32) (*domain.StoreService, error) {
 	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store service: %w", err)
@@ -129,6 +129,9 @@ func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID, reque
 	}
 	if isActive != nil {
 		service.IsActive = *isActive
+	}
+	if minLeadTimeMinutes != nil {
+		service.MinLeadTimeMinutes = *minLeadTimeMinutes
 	}
 
 	if !service.IsValid() {

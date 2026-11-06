@@ -30,51 +30,55 @@ func NewStoreServiceHandler(usecase *usecase.StoreServiceUseCase, validator *val
 
 // storeServiceResponse struct
 type storeServiceResponse struct {
-	ID              string    `json:"id"`
-	StoreID         string    `json:"store_id"`
-	CategoryID      string    `json:"category_id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	DurationMinutes int32     `json:"duration_minutes"`
-	Price           float64   `json:"price"`
-	IsActive        bool      `json:"is_active"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	StoreID            string    `json:"store_id"`
+	CategoryID         string    `json:"category_id"`
+	Name               string    `json:"name"`
+	Description        string    `json:"description,omitempty"`
+	DurationMinutes    int32     `json:"duration_minutes"`
+	Price              float64   `json:"price"`
+	IsActive           bool      `json:"is_active"`
+	MinLeadTimeMinutes int32     `json:"min_lead_time_minutes"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // toStoreServiceResponse function
 func toStoreServiceResponse(service *domain.StoreService) storeServiceResponse {
 	return storeServiceResponse{
-		ID:              service.ID,
-		StoreID:         service.StoreID,
-		CategoryID:      service.CategoryID,
-		Name:            service.Name,
-		Description:     service.Description,
-		DurationMinutes: service.DurationMinutes,
-		Price:           service.Price,
-		IsActive:        service.IsActive,
-		CreatedAt:       service.CreatedAt,
-		UpdatedAt:       service.UpdatedAt,
+		ID:                 service.ID,
+		StoreID:            service.StoreID,
+		CategoryID:         service.CategoryID,
+		Name:               service.Name,
+		Description:        service.Description,
+		DurationMinutes:    service.DurationMinutes,
+		Price:              service.Price,
+		IsActive:           service.IsActive,
+		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
+		CreatedAt:          service.CreatedAt,
+		UpdatedAt:          service.UpdatedAt,
 	}
 }
 
 // createStoreServiceRequest struct
 type createStoreServiceRequest struct {
-	CategoryID      string  `json:"category_id" validate:"required,uuid"`
-	Name            string  `json:"name" validate:"required,min=2,max=100"`
-	Description     string  `json:"description" validate:"omitempty,max=1000"`
-	DurationMinutes int32   `json:"duration_minutes" validate:"required,min=1"`
-	Price           float64 `json:"price" validate:"omitempty,min=0"`
+	CategoryID         string  `json:"category_id" validate:"required,uuid"`
+	Name               string  `json:"name" validate:"required,min=2,max=100"`
+	Description        string  `json:"description" validate:"omitempty,max=1000"`
+	DurationMinutes    int32   `json:"duration_minutes" validate:"required,min=1"`
+	Price              float64 `json:"price" validate:"omitempty,min=0"`
+	MinLeadTimeMinutes int32   `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
 }
 
 // updateStoreServiceRequest struct
 type updateStoreServiceRequest struct {
-	CategoryID      *string  `json:"category_id" validate:"omitempty,uuid"`
-	Name            *string  `json:"name" validate:"omitempty,min=2,max=100"`
-	Description     *string  `json:"description" validate:"omitempty,max=1000"`
-	DurationMinutes *int32   `json:"duration_minutes" validate:"omitempty,min=1"`
-	Price           *float64 `json:"price" validate:"omitempty,min=0"`
-	IsActive        *bool    `json:"is_active"`
+	CategoryID         *string  `json:"category_id" validate:"omitempty,uuid"`
+	Name               *string  `json:"name" validate:"omitempty,min=2,max=100"`
+	Description        *string  `json:"description" validate:"omitempty,max=1000"`
+	DurationMinutes    *int32   `json:"duration_minutes" validate:"omitempty,min=1"`
+	Price              *float64 `json:"price" validate:"omitempty,min=0"`
+	IsActive           *bool    `json:"is_active"`
+	MinLeadTimeMinutes *int32   `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
 }
 
 // decodeJSONBody decodes a request body into dest, rejecting unknown fields and trailing data.
@@ -141,6 +145,7 @@ func (handler *StoreServiceHandler) Create(writer http.ResponseWriter, request *
 		req.Description,
 		req.DurationMinutes,
 		req.Price,
+		req.MinLeadTimeMinutes,
 	)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
@@ -202,6 +207,7 @@ func (handler *StoreServiceHandler) Update(writer http.ResponseWriter, request *
 		req.DurationMinutes,
 		req.Price,
 		req.IsActive,
+		req.MinLeadTimeMinutes,
 	)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)

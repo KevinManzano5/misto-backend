@@ -12,18 +12,19 @@ import (
 )
 
 const createStoreService = `-- name: CreateStoreService :one
-INSERT INTO store_services (store_id, category_id, name, description, duration_minutes, price)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at
+INSERT INTO store_services (store_id, category_id, name, description, duration_minutes, price, min_lead_time_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at, min_lead_time_minutes
 `
 
 type CreateStoreServiceParams struct {
-	StoreID         pgtype.UUID    `json:"store_id"`
-	CategoryID      pgtype.UUID    `json:"category_id"`
-	Name            string         `json:"name"`
-	Description     *string        `json:"description"`
-	DurationMinutes int32          `json:"duration_minutes"`
-	Price           pgtype.Numeric `json:"price"`
+	StoreID            pgtype.UUID    `json:"store_id"`
+	CategoryID         pgtype.UUID    `json:"category_id"`
+	Name               string         `json:"name"`
+	Description        *string        `json:"description"`
+	DurationMinutes    int32          `json:"duration_minutes"`
+	Price              pgtype.Numeric `json:"price"`
+	MinLeadTimeMinutes int32          `json:"min_lead_time_minutes"`
 }
 
 func (q *Queries) CreateStoreService(ctx context.Context, arg CreateStoreServiceParams) (StoreService, error) {
@@ -34,6 +35,7 @@ func (q *Queries) CreateStoreService(ctx context.Context, arg CreateStoreService
 		arg.Description,
 		arg.DurationMinutes,
 		arg.Price,
+		arg.MinLeadTimeMinutes,
 	)
 	var i StoreService
 	err := row.Scan(
@@ -47,6 +49,7 @@ func (q *Queries) CreateStoreService(ctx context.Context, arg CreateStoreService
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinLeadTimeMinutes,
 	)
 	return i, err
 }
@@ -62,7 +65,7 @@ func (q *Queries) DeleteStoreService(ctx context.Context, id pgtype.UUID) error 
 }
 
 const getStoreServiceByID = `-- name: GetStoreServiceByID :one
-SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at FROM store_services
+SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at, min_lead_time_minutes FROM store_services
 WHERE id = $1
 LIMIT 1
 `
@@ -81,12 +84,13 @@ func (q *Queries) GetStoreServiceByID(ctx context.Context, id pgtype.UUID) (Stor
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinLeadTimeMinutes,
 	)
 	return i, err
 }
 
 const listAllStoreServicesByStore = `-- name: ListAllStoreServicesByStore :many
-SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at FROM store_services
+SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at, min_lead_time_minutes FROM store_services
 WHERE store_id = $1
 ORDER BY name
 `
@@ -111,6 +115,7 @@ func (q *Queries) ListAllStoreServicesByStore(ctx context.Context, storeID pgtyp
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MinLeadTimeMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -123,7 +128,7 @@ func (q *Queries) ListAllStoreServicesByStore(ctx context.Context, storeID pgtyp
 }
 
 const listStoreServicesByStore = `-- name: ListStoreServicesByStore :many
-SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at FROM store_services
+SELECT id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at, min_lead_time_minutes FROM store_services
 WHERE store_id = $1 AND is_active = TRUE
 ORDER BY name
 `
@@ -148,6 +153,7 @@ func (q *Queries) ListStoreServicesByStore(ctx context.Context, storeID pgtype.U
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MinLeadTimeMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -162,25 +168,27 @@ func (q *Queries) ListStoreServicesByStore(ctx context.Context, storeID pgtype.U
 const updateStoreService = `-- name: UpdateStoreService :one
 UPDATE store_services
 SET
-    category_id      = $2,
-    name             = $3,
-    description      = $4,
-    duration_minutes = $5,
-    price            = $6,
-    is_active        = $7,
-    updated_at       = CURRENT_TIMESTAMP
+    category_id            = $2,
+    name                   = $3,
+    description            = $4,
+    duration_minutes       = $5,
+    price                  = $6,
+    is_active              = $7,
+    min_lead_time_minutes  = $8,
+    updated_at             = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at
+RETURNING id, store_id, category_id, name, description, duration_minutes, price, is_active, created_at, updated_at, min_lead_time_minutes
 `
 
 type UpdateStoreServiceParams struct {
-	ID              pgtype.UUID    `json:"id"`
-	CategoryID      pgtype.UUID    `json:"category_id"`
-	Name            string         `json:"name"`
-	Description     *string        `json:"description"`
-	DurationMinutes int32          `json:"duration_minutes"`
-	Price           pgtype.Numeric `json:"price"`
-	IsActive        bool           `json:"is_active"`
+	ID                 pgtype.UUID    `json:"id"`
+	CategoryID         pgtype.UUID    `json:"category_id"`
+	Name               string         `json:"name"`
+	Description        *string        `json:"description"`
+	DurationMinutes    int32          `json:"duration_minutes"`
+	Price              pgtype.Numeric `json:"price"`
+	IsActive           bool           `json:"is_active"`
+	MinLeadTimeMinutes int32          `json:"min_lead_time_minutes"`
 }
 
 func (q *Queries) UpdateStoreService(ctx context.Context, arg UpdateStoreServiceParams) (StoreService, error) {
@@ -192,6 +200,7 @@ func (q *Queries) UpdateStoreService(ctx context.Context, arg UpdateStoreService
 		arg.DurationMinutes,
 		arg.Price,
 		arg.IsActive,
+		arg.MinLeadTimeMinutes,
 	)
 	var i StoreService
 	err := row.Scan(
@@ -205,6 +214,7 @@ func (q *Queries) UpdateStoreService(ctx context.Context, arg UpdateStoreService
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinLeadTimeMinutes,
 	)
 	return i, err
 }

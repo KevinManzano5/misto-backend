@@ -129,10 +129,6 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 		return nil, fmt.Errorf("%w: payment method must be %q or %q", domain.ErrInvalidInput, domain.PaymentMethodCashOnSite, domain.PaymentMethodCardAdvance)
 	}
 
-	if startTime.Before(time.Now()) {
-		return nil, fmt.Errorf("%w: cannot schedule an appointment in the past", domain.ErrInvalidInput)
-	}
-
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
@@ -141,6 +137,11 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 	service, err := usecase.resolveService(ctx, storeID, serviceID)
 	if err != nil {
 		return nil, err
+	}
+
+	minLeadTime := time.Duration(service.MinLeadTimeMinutes) * time.Minute
+	if startTime.Before(time.Now().Add(minLeadTime)) {
+		return nil, fmt.Errorf("%w: appointments for this service must be booked at least %d minutes in advance", domain.ErrInvalidInput, service.MinLeadTimeMinutes)
 	}
 
 	if !store.AllowSameDayAppointments && isSameLocalDay(startTime, time.Now(), storeLocation(store)) {
@@ -310,13 +311,14 @@ func (usecase *AppointmentUseCase) ListByStoreDate(ctx context.Context, storeID 
 // store's opening hours and booked appointments for a specific calendar date, in the store's
 // own timezone.
 type daySchedule struct {
-	location        *time.Location
-	targetDate      time.Time
-	durationMinutes int32
-	openTime        time.Time
-	closeTime       time.Time
-	isOpen          bool
-	appointments    []*domain.Appointment
+	location           *time.Location
+	targetDate         time.Time
+	durationMinutes    int32
+	minLeadTimeMinutes int32
+	openTime           time.Time
+	closeTime          time.Time
+	isOpen             bool
+	appointments       []*domain.Appointment
 }
 
 // resolveDaySchedule parses dateStr as a calendar date in the store's own timezone (not UTC),
@@ -350,7 +352,7 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	}
 
 	if !store.AllowSameDayAppointments && isSameLocalDay(targetDate, now, loc) {
-		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes, minLeadTimeMinutes: service.MinLeadTimeMinutes}, nil
 	}
 
 	dayOfWeek := int32(targetDate.Weekday())
@@ -358,13 +360,13 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	if err != nil {
 		// If there is no schedule in the DB for that day, we assume it is closed.
 		if errors.Is(err, domain.ErrNotFound) {
-			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
+			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes, minLeadTimeMinutes: service.MinLeadTimeMinutes}, nil
 		}
 		return nil, fmt.Errorf("getting store schedule: %w", err)
 	}
 
 	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
-		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes}, nil
+		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes, minLeadTimeMinutes: service.MinLeadTimeMinutes}, nil
 	}
 
 	openTime, err := parseScheduleClockTime(targetDate, schedule.OpenTime)
@@ -386,19 +388,20 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	}
 
 	return &daySchedule{
-		location:        loc,
-		targetDate:      targetDate,
-		durationMinutes: service.DurationMinutes,
-		openTime:        openTime,
-		closeTime:       closeTime,
-		isOpen:          true,
-		appointments:    appointments,
+		location:           loc,
+		targetDate:         targetDate,
+		durationMinutes:    service.DurationMinutes,
+		minLeadTimeMinutes: service.MinLeadTimeMinutes,
+		openTime:           openTime,
+		closeTime:          closeTime,
+		isOpen:             true,
+		appointments:       appointments,
 	}, nil
 }
 
 // availableSlots computes the free start times for day, in "HH:MM" format (the store's local
-// time), skipping slots that overlap an existing appointment or that have already passed (when
-// day is today in the store's timezone).
+// time), skipping slots that overlap an existing appointment or that, when day is today in the
+// store's timezone, start before now plus the service's minimum lead time.
 func (day *daySchedule) availableSlots() []string {
 	availableSlots := make([]string, 0)
 	if !day.isOpen {
@@ -413,8 +416,10 @@ func (day *daySchedule) availableSlots() []string {
 		slotEnd := currentSlot.Add(slotDuration)
 		isAvailable := true
 
-		// If the selected schedule is for today (in the store's timezone), omit hours already passed.
-		if day.targetDate.YearDay() == now.YearDay() && day.targetDate.Year() == now.Year() && currentSlot.Before(now) {
+		// If the selected schedule is for today (in the store's timezone), omit hours already
+		// passed or within the service's minimum lead time.
+		minLeadTime := time.Duration(day.minLeadTimeMinutes) * time.Minute
+		if day.targetDate.YearDay() == now.YearDay() && day.targetDate.Year() == now.Year() && currentSlot.Before(now.Add(minLeadTime)) {
 			isAvailable = false
 		}
 
