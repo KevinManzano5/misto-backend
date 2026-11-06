@@ -122,6 +122,44 @@ func (q *Queries) GetStoreRatingByID(ctx context.Context, id pgtype.UUID) (Store
 	return i, err
 }
 
+const getStoreRatingSummariesByStores = `-- name: GetStoreRatingSummariesByStores :many
+SELECT
+    store_id,
+    COALESCE(AVG(score)::float8, 0)::float8 AS average_score,
+    COUNT(*) AS rating_count
+FROM store_ratings
+WHERE store_id = ANY($1::uuid[])
+GROUP BY store_id
+`
+
+type GetStoreRatingSummariesByStoresRow struct {
+	StoreID      pgtype.UUID `json:"store_id"`
+	AverageScore float64     `json:"average_score"`
+	RatingCount  int64       `json:"rating_count"`
+}
+
+// Average score + count per store, for a batch of stores (e.g. a store listing), computed in one
+// query to avoid N+1. Stores with zero ratings are simply absent from the result.
+func (q *Queries) GetStoreRatingSummariesByStores(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetStoreRatingSummariesByStoresRow, error) {
+	rows, err := q.db.Query(ctx, getStoreRatingSummariesByStores, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStoreRatingSummariesByStoresRow{}
+	for rows.Next() {
+		var i GetStoreRatingSummariesByStoresRow
+		if err := rows.Scan(&i.StoreID, &i.AverageScore, &i.RatingCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStoreRatingSummaryByStore = `-- name: GetStoreRatingSummaryByStore :one
 SELECT
     COALESCE(AVG(score)::float8, 0)::float8 AS average_score,
@@ -141,6 +179,34 @@ func (q *Queries) GetStoreRatingSummaryByStore(ctx context.Context, storeID pgty
 	var i GetStoreRatingSummaryByStoreRow
 	err := row.Scan(&i.AverageScore, &i.RatingCount)
 	return i, err
+}
+
+const listRatedAppointmentIDs = `-- name: ListRatedAppointmentIDs :many
+SELECT appointment_id FROM store_ratings
+WHERE appointment_id = ANY($1::uuid[])
+`
+
+// Which of a batch of appointment IDs already has a rating (e.g. a client's "my appointments"
+// list deciding whether to show a "leave a review" action), computed in one query to avoid N+1.
+// An appointmentID with no rating is simply absent from the result.
+func (q *Queries) ListRatedAppointmentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listRatedAppointmentIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var appointment_id pgtype.UUID
+		if err := rows.Scan(&appointment_id); err != nil {
+			return nil, err
+		}
+		items = append(items, appointment_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listStoreRatingsByStore = `-- name: ListStoreRatingsByStore :many

@@ -16,17 +16,19 @@ import (
 
 // AppointmentHandler struct
 type AppointmentHandler struct {
-	usecase   *usecase.AppointmentUseCase
-	validator *validator.Validator
-	logger    *slog.Logger
+	usecase       *usecase.AppointmentUseCase
+	ratingUsecase *usecase.StoreRatingUseCase
+	validator     *validator.Validator
+	logger        *slog.Logger
 }
 
 // NewAppointmentHandler constructor
-func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, validator *validator.Validator, logger *slog.Logger) *AppointmentHandler {
+func NewAppointmentHandler(usecase *usecase.AppointmentUseCase, ratingUsecase *usecase.StoreRatingUseCase, validator *validator.Validator, logger *slog.Logger) *AppointmentHandler {
 	return &AppointmentHandler{
-		usecase:   usecase,
-		validator: validator,
-		logger:    logger,
+		usecase:       usecase,
+		ratingUsecase: ratingUsecase,
+		validator:     validator,
+		logger:        logger,
 	}
 }
 
@@ -267,18 +269,32 @@ type myAppointmentResponse struct {
 	Status        string    `json:"status"`
 	PaymentMethod string    `json:"payment_method"`
 	PaymentStatus string    `json:"payment_status"`
+	// HasRating is true when this appointment already has a review; only a completed
+	// appointment without one can still be rated via POST /appointments/{id}/ratings.
+	HasRating bool `json:"has_rating"`
 }
 
 // GetMyAppointments endpoint (e.g., GET /appointments)
 //
 // @Summary Get the authenticated user's own appointments
-// @Description Lists every appointment ever booked by the authenticated user, any status, with the basic info of the store it was booked at.
+// @Description Lists every appointment ever booked by the authenticated user, any status, with the basic info of the store it was booked at and whether it has already been rated.
 // @Tags appointments
 // @Produce json
 // @Success 200 {array} myAppointmentResponse
 // @Router /appointments [get]
 func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter, request *http.Request) {
 	appointments, err := handler.usecase.ListMyAppointments(request.Context(), middlewares.GetUserID(request))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	appointmentIDs := make([]string, 0, len(appointments))
+	for _, appointment := range appointments {
+		appointmentIDs = append(appointmentIDs, appointment.ID)
+	}
+
+	ratedByAppointmentID, err := handler.ratingUsecase.ListRatedAppointmentIDs(request.Context(), appointmentIDs)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -295,6 +311,7 @@ func (handler *AppointmentHandler) GetMyAppointments(writer http.ResponseWriter,
 			Status:        appointment.Status,
 			PaymentMethod: appointment.PaymentMethod,
 			PaymentStatus: appointment.PaymentStatus,
+			HasRating:     ratedByAppointmentID[appointment.ID],
 		})
 	}
 

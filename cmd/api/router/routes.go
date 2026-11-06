@@ -108,8 +108,9 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 
 // setupStoreRatingRoutes registers endpoints for rating a store's completed appointments (mixed).
 // Create is nested under the appointment it rates (identity and authorization both derive from
-// it); listing/summary are nested under the store (how a public store page consumes them);
-// update/delete are top-level once the rating's own ID is known.
+// it); listing is nested under the store (how a public store page consumes it) — its rating
+// average/count summary is served as part of the store's own GET/list responses instead of a
+// separate endpoint; update/delete are top-level once the rating's own ID is known.
 func setupStoreRatingRoutes(srv *server.Server, rating *handler.StoreRatingHandler, authMW middlewares.Middleware) {
 	// Helper for wrapping protected handlers
 	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
@@ -118,7 +119,6 @@ func setupStoreRatingRoutes(srv *server.Server, rating *handler.StoreRatingHandl
 
 	// Public
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/ratings", http.HandlerFunc(rating.ListByStore))
-	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/ratings/summary", http.HandlerFunc(rating.GetSummary))
 
 	// Private
 	srv.RegisterRoutes("POST /api/v1/appointments/{appointmentId}/ratings", withAuth(rating.Create))

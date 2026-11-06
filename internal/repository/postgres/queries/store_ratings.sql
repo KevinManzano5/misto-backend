@@ -55,6 +55,24 @@ SELECT
 FROM store_ratings
 WHERE store_id = $1;
 
+-- name: ListRatedAppointmentIDs :many
+-- Which of a batch of appointment IDs already has a rating (e.g. a client's "my appointments"
+-- list deciding whether to show a "leave a review" action), computed in one query to avoid N+1.
+-- An appointmentID with no rating is simply absent from the result.
+SELECT appointment_id FROM store_ratings
+WHERE appointment_id = ANY($1::uuid[]);
+
+-- name: GetStoreRatingSummariesByStores :many
+-- Average score + count per store, for a batch of stores (e.g. a store listing), computed in one
+-- query to avoid N+1. Stores with zero ratings are simply absent from the result.
+SELECT
+    store_id,
+    COALESCE(AVG(score)::float8, 0)::float8 AS average_score,
+    COUNT(*) AS rating_count
+FROM store_ratings
+WHERE store_id = ANY($1::uuid[])
+GROUP BY store_id;
+
 -- name: UpdateStoreRating :one
 UPDATE store_ratings
 SET

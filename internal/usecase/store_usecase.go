@@ -52,18 +52,69 @@ type ScheduleRepository interface {
 	ListStoreSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error)
 }
 
+// StoreRatingSummaryRepository interface (narrowed to what StoreUseCase needs to embed a store's
+// rating average/count into its own responses).
+type StoreRatingSummaryRepository interface {
+	GetStoreRatingSummaryByStore(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error)
+	GetStoreRatingSummariesByStores(ctx context.Context, storeIDs []string) ([]*domain.StoreRatingSummary, error)
+}
+
 // StoreUseCase struct
 type StoreUseCase struct {
 	repo         StoreRepository
 	scheduleRepo ScheduleRepository
+	ratingRepo   StoreRatingSummaryRepository
 }
 
 // NewStoreUseCase constructor
-func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository) *StoreUseCase {
+func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository, ratingRepo StoreRatingSummaryRepository) *StoreUseCase {
 	return &StoreUseCase{
 		repo:         repo,
 		scheduleRepo: scheduleRepo,
+		ratingRepo:   ratingRepo,
 	}
+}
+
+// zeroStoreRatingSummary is returned for a store with no ratings yet, since the repository
+// simply omits such stores from its results rather than returning a zeroed row.
+func zeroStoreRatingSummary(storeID string) *domain.StoreRatingSummary {
+	return &domain.StoreRatingSummary{StoreID: storeID}
+}
+
+// GetRatingSummary returns the average score and rating count for a single store. Public: no
+// authorization check.
+func (usecase *StoreUseCase) GetRatingSummary(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error) {
+	summary, err := usecase.ratingRepo.GetStoreRatingSummaryByStore(ctx, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store rating summary: %w", err)
+	}
+
+	return summary, nil
+}
+
+// ListRatingSummaries returns the average score and rating count for each of storeIDs, keyed by
+// store ID, computed in a single query to avoid N+1 lookups when building a store listing. A
+// storeID with no ratings yet is included with a zero summary.
+func (usecase *StoreUseCase) ListRatingSummaries(ctx context.Context, storeIDs []string) (map[string]*domain.StoreRatingSummary, error) {
+	summaries := make(map[string]*domain.StoreRatingSummary, len(storeIDs))
+	for _, storeID := range storeIDs {
+		summaries[storeID] = zeroStoreRatingSummary(storeID)
+	}
+
+	if len(storeIDs) == 0 {
+		return summaries, nil
+	}
+
+	results, err := usecase.ratingRepo.GetStoreRatingSummariesByStores(ctx, storeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing store rating summaries: %w", err)
+	}
+
+	for _, result := range results {
+		summaries[result.StoreID] = result
+	}
+
+	return summaries, nil
 }
 
 // Create method creates a store along with a default weekly schedule (open every day

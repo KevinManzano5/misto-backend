@@ -73,13 +73,6 @@ type listStoreRatingsResponse struct {
 	PageSize   int32                           `json:"page_size"`
 }
 
-// storeRatingSummaryResponse struct
-type storeRatingSummaryResponse struct {
-	StoreID      string  `json:"store_id"`
-	AverageScore float64 `json:"average_score"`
-	RatingCount  int64   `json:"rating_count"`
-}
-
 // Create endpoint (e.g., POST /appointments/{appointmentId}/ratings)
 //
 // @Summary Rate a completed appointment
@@ -223,39 +216,6 @@ func (handler *StoreRatingHandler) ListByStore(writer http.ResponseWriter, reque
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
-		handler.logger.ErrorContext(
-			request.Context(),
-			"error trying to write JSON response",
-			"error", err,
-			"method", request.Method,
-			"path", request.URL.Path,
-		)
-	}
-}
-
-// GetSummary endpoint (e.g., GET /stores/{storeId}/ratings/summary)
-//
-// @Summary Get a store's rating summary
-// @Description Average score and total rating count for a store, computed on demand.
-// @Tags store_ratings
-// @Produce json
-// @Param storeId path string true "Store ID"
-// @Success 200 {object} storeRatingSummaryResponse
-// @Router /stores/{storeId}/ratings/summary [get]
-func (handler *StoreRatingHandler) GetSummary(writer http.ResponseWriter, request *http.Request) {
-	storeID := request.PathValue("storeId")
-
-	summary, err := handler.usecase.GetSummaryByStore(request.Context(), storeID)
-	if err != nil {
-		RespondError(writer, request, handler.logger, err)
-		return
-	}
-
-	if err := RespondJSON(writer, http.StatusOK, storeRatingSummaryResponse{
-		StoreID:      summary.StoreID,
-		AverageScore: summary.AverageScore,
-		RatingCount:  summary.RatingCount,
-	}); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",

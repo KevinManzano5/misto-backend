@@ -15,7 +15,7 @@ type StoreRatingRepository interface {
 	GetStoreRatingByAppointmentID(ctx context.Context, appointmentID string) (*domain.StoreRating, error)
 	ListStoreRatingsByStore(ctx context.Context, storeID string, limit, offset int32) ([]*domain.StoreRatingWithClient, error)
 	CountStoreRatingsByStore(ctx context.Context, storeID string) (int64, error)
-	GetStoreRatingSummaryByStore(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error)
+	ListRatedAppointmentIDs(ctx context.Context, appointmentIDs []string) ([]string, error)
 	UpdateStoreRating(ctx context.Context, id string, score int32, comment string) (*domain.StoreRating, error)
 	DeleteStoreRating(ctx context.Context, id string) error
 }
@@ -112,15 +112,26 @@ func (usecase *StoreRatingUseCase) ListByStore(ctx context.Context, storeID stri
 	return ratings, total, nil
 }
 
-// GetSummaryByStore returns the average score and total rating count for a store. Public: no
-// authorization check.
-func (usecase *StoreRatingUseCase) GetSummaryByStore(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error) {
-	summary, err := usecase.repo.GetStoreRatingSummaryByStore(ctx, storeID)
-	if err != nil {
-		return nil, fmt.Errorf("getting store rating summary: %w", err)
+// ListRatedAppointmentIDs returns which of appointmentIDs already has a rating, as a set keyed
+// by appointment ID. An appointmentID with no rating is simply absent from the map. Used to
+// annotate a client's own appointment list with whether each one can still be rated.
+func (usecase *StoreRatingUseCase) ListRatedAppointmentIDs(ctx context.Context, appointmentIDs []string) (map[string]bool, error) {
+	rated := make(map[string]bool, len(appointmentIDs))
+
+	if len(appointmentIDs) == 0 {
+		return rated, nil
 	}
 
-	return summary, nil
+	results, err := usecase.repo.ListRatedAppointmentIDs(ctx, appointmentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing rated appointment IDs: %w", err)
+	}
+
+	for _, appointmentID := range results {
+		rated[appointmentID] = true
+	}
+
+	return rated, nil
 }
 
 // Update edits the score/comment of a rating. Only the rating's author may edit it.

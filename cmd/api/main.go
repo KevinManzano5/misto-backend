@@ -98,7 +98,7 @@ func main() {
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
-	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo)
+	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo, storeRatingRepo)
 	paymentProcessor := payment.NewStubProcessor()
 	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, paymentProcessor, paymentTransactionRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
@@ -140,7 +140,7 @@ func main() {
 		User:          handler.NewUserHandler(userUC, storeUC, validate, log),
 		Auth:          handler.NewAuthHandler(authUC, validate, log),
 		Store:         handler.NewStoreHandler(storeUC, storeCategoryAssignmentUC, validate, log),
-		Appointment:   handler.NewAppointmentHandler(appointmentUC, validate, log),
+		Appointment:   handler.NewAppointmentHandler(appointmentUC, storeRatingUC, validate, log),
 		StoreRating:   handler.NewStoreRatingHandler(storeRatingUC, validate, log),
 		StoreCategory: handler.NewStoreCategoryHandler(storeCategoryUC, log),
 	}

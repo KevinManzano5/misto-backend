@@ -63,6 +63,18 @@ func (f *fakeScheduleRepository) ListStoreSchedules(ctx context.Context, storeID
 	panic("not implemented")
 }
 
+// fakeStoreRatingSummaryRepository is a minimal StoreRatingSummaryRepository test double; unused
+// by these tests since none of them exercise rating summaries.
+type fakeStoreRatingSummaryRepository struct{}
+
+func (f *fakeStoreRatingSummaryRepository) GetStoreRatingSummaryByStore(ctx context.Context, storeID string) (*domain.StoreRatingSummary, error) {
+	panic("not implemented")
+}
+
+func (f *fakeStoreRatingSummaryRepository) GetStoreRatingSummariesByStores(ctx context.Context, storeIDs []string) ([]*domain.StoreRatingSummary, error) {
+	panic("not implemented")
+}
+
 func TestCreate_SetsSlugFromName(t *testing.T) {
 	var captured *domain.Store
 	repo := &fakeStoreRepository{
@@ -71,7 +83,7 @@ func TestCreate_SetsSlugFromName(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{})
+	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
 
 	_, err := uc.Create(context.Background(), "user-1", "Café Sol", "desc", true, 30, "America/Bogota", true, "", "", true, "")
 	if err != nil {
@@ -95,7 +107,7 @@ func TestUpdate_NameChangeRecomputesSlug(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{})
+	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
 
 	newName := "New Name"
 	_, err := uc.Update(context.Background(), "store-1", &newName, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -120,7 +132,7 @@ func TestUpdate_NoNameChangeKeepsSlug(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{})
+	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
 
 	newDescription := "updated description"
 	_, err := uc.Update(context.Background(), "store-1", nil, &newDescription, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -148,7 +160,7 @@ func TestBackfillMissingSlugs(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{})
+	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
 
 	count, err := uc.BackfillMissingSlugs(context.Background())
 	if err != nil {
