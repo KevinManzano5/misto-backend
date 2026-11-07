@@ -5,13 +5,14 @@ import "time"
 // StoreService represents a service a store offers (e.g. "Haircut", "Manicure"), scoped to one
 // of the categories assigned to that store.
 type StoreService struct {
-	ID                 string
-	StoreID            string
-	CategoryID         string
-	Name               string
-	Description        string
-	DurationMinutes    int32
-	Price              float64
+	ID              string
+	StoreID         string
+	CategoryID      string
+	Name            string
+	Description     string
+	DurationMinutes int32
+	// Price is in whole Colombian pesos (COP); COP has no decimal subunit.
+	Price              int64
 	IsActive           bool
 	MinLeadTimeMinutes int32
 	CreatedAt          time.Time
@@ -19,7 +20,7 @@ type StoreService struct {
 }
 
 // NewStoreService constructor
-func NewStoreService(storeID, categoryID, name, description string, durationMinutes int32, price float64, minLeadTimeMinutes int32) *StoreService {
+func NewStoreService(storeID, categoryID, name, description string, durationMinutes int32, price int64, minLeadTimeMinutes int32) *StoreService {
 	now := time.Now()
 
 	return &StoreService{

@@ -18,13 +18,13 @@ RETURNING id, store_id, category_id, name, description, duration_minutes, price,
 `
 
 type CreateStoreServiceParams struct {
-	StoreID            pgtype.UUID    `json:"store_id"`
-	CategoryID         pgtype.UUID    `json:"category_id"`
-	Name               string         `json:"name"`
-	Description        *string        `json:"description"`
-	DurationMinutes    int32          `json:"duration_minutes"`
-	Price              pgtype.Numeric `json:"price"`
-	MinLeadTimeMinutes int32          `json:"min_lead_time_minutes"`
+	StoreID            pgtype.UUID `json:"store_id"`
+	CategoryID         pgtype.UUID `json:"category_id"`
+	Name               string      `json:"name"`
+	Description        *string     `json:"description"`
+	DurationMinutes    int32       `json:"duration_minutes"`
+	Price              int64       `json:"price"`
+	MinLeadTimeMinutes int32       `json:"min_lead_time_minutes"`
 }
 
 func (q *Queries) CreateStoreService(ctx context.Context, arg CreateStoreServiceParams) (StoreService, error) {
@@ -181,14 +181,14 @@ RETURNING id, store_id, category_id, name, description, duration_minutes, price,
 `
 
 type UpdateStoreServiceParams struct {
-	ID                 pgtype.UUID    `json:"id"`
-	CategoryID         pgtype.UUID    `json:"category_id"`
-	Name               string         `json:"name"`
-	Description        *string        `json:"description"`
-	DurationMinutes    int32          `json:"duration_minutes"`
-	Price              pgtype.Numeric `json:"price"`
-	IsActive           bool           `json:"is_active"`
-	MinLeadTimeMinutes int32          `json:"min_lead_time_minutes"`
+	ID                 pgtype.UUID `json:"id"`
+	CategoryID         pgtype.UUID `json:"category_id"`
+	Name               string      `json:"name"`
+	Description        *string     `json:"description"`
+	DurationMinutes    int32       `json:"duration_minutes"`
+	Price              int64       `json:"price"`
+	IsActive           bool        `json:"is_active"`
+	MinLeadTimeMinutes int32       `json:"min_lead_time_minutes"`
 }
 
 func (q *Queries) UpdateStoreService(ctx context.Context, arg UpdateStoreServiceParams) (StoreService, error) {
