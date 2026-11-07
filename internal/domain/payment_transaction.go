@@ -11,8 +11,9 @@ import "time"
 type PaymentTransaction struct {
 	ID            string
 	AppointmentID string
-	// Amount is in whole Colombian pesos (COP); COP has no decimal subunit. Always 0 today: no
-	// pricing model exists yet, this is a placeholder for a future pricing iteration, not a bug.
+	// Amount is in whole Colombian pesos (COP); COP has no decimal subunit. It is the service's
+	// price plus the store's app usage fee percentage (see ApplyPercentageFee), i.e. what the
+	// client actually pays, not what the store receives.
 	Amount   int64
 	Currency string
 	// Status reuses PaymentStatusPending/PaymentStatusPaid/PaymentStatusFailed.
@@ -28,8 +29,7 @@ type PaymentTransaction struct {
 // defaultPaymentTransactionCurrency is the only currency this app supports (Colombian pesos).
 const defaultPaymentTransactionCurrency = "cop"
 
-// NewPaymentTransaction constructor. amount is in whole COP, always 0 until a real pricing model
-// exists.
+// NewPaymentTransaction constructor. amount is in whole COP (see ApplyPercentageFee).
 func NewPaymentTransaction(appointmentID string, amount int64, status, paymentMethod, failureReason string) *PaymentTransaction {
 	return &PaymentTransaction{
 		AppointmentID: appointmentID,

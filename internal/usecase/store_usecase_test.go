@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
@@ -14,6 +16,7 @@ type fakeStoreRepository struct {
 	getStoreByIDFunc          func(ctx context.Context, id string) (*domain.Store, error)
 	updateStoreFunc           func(ctx context.Context, store *domain.Store) error
 	listStoresWithoutSlugFunc func(ctx context.Context) ([]*domain.Store, error)
+	updateAppUsageFeeFunc     func(ctx context.Context, storeID string, percentage int32) (*domain.Store, error)
 }
 
 func (f *fakeStoreRepository) CreateStore(ctx context.Context, store *domain.Store) error {
@@ -50,6 +53,10 @@ func (f *fakeStoreRepository) CountStores(ctx context.Context) (int64, error) {
 
 func (f *fakeStoreRepository) ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error) {
 	return f.listStoresWithoutSlugFunc(ctx)
+}
+
+func (f *fakeStoreRepository) UpdateAppUsageFeePercentage(ctx context.Context, storeID string, percentage int32) (*domain.Store, error) {
+	return f.updateAppUsageFeeFunc(ctx, storeID, percentage)
 }
 
 // fakeStoreRatingSummaryRepository is a minimal StoreRatingSummaryRepository test double; unused
@@ -158,6 +165,69 @@ func TestUpdate_TogglesPaymentMethods(t *testing.T) {
 	}
 	if !captured.CardAdvanceEnabled {
 		t.Error("expected CardAdvanceEnabled to remain true")
+	}
+}
+
+func TestUpdateAppUsageFeePercentage_RejectsOutOfRangeValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		percentage int32
+		wantErr    bool
+	}{
+		{name: "min boundary valid", percentage: 0, wantErr: false},
+		{name: "mid value valid", percentage: 50, wantErr: false},
+		{name: "max boundary valid", percentage: 100, wantErr: false},
+		{name: "negative invalid", percentage: -1, wantErr: true},
+		{name: "above max invalid", percentage: 101, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedPercentage int32
+			repo := &fakeStoreRepository{
+				updateAppUsageFeeFunc: func(ctx context.Context, storeID string, percentage int32) (*domain.Store, error) {
+					capturedPercentage = percentage
+					return &domain.Store{ID: storeID, AppUsageFeePercentage: percentage}, nil
+				},
+			}
+			uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
+
+			store, err := uc.UpdateAppUsageFeePercentage(context.Background(), "store-1", tt.percentage)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for percentage %d, got nil", tt.percentage)
+				}
+				if !errors.Is(err, domain.ErrInvalidInput) {
+					t.Errorf("error = %v, want wrapping domain.ErrInvalidInput", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if capturedPercentage != tt.percentage {
+				t.Errorf("repo called with percentage %d, want %d", capturedPercentage, tt.percentage)
+			}
+			if store.AppUsageFeePercentage != tt.percentage {
+				t.Errorf("returned store AppUsageFeePercentage = %d, want %d", store.AppUsageFeePercentage, tt.percentage)
+			}
+		})
+	}
+}
+
+func TestUpdateAppUsageFeePercentage_PropagatesNotFound(t *testing.T) {
+	repo := &fakeStoreRepository{
+		updateAppUsageFeeFunc: func(ctx context.Context, storeID string, percentage int32) (*domain.Store, error) {
+			return nil, fmt.Errorf("store with id %s: %w", storeID, domain.ErrNotFound)
+		},
+	}
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
+
+	_, err := uc.UpdateAppUsageFeePercentage(context.Background(), "missing-store", 10)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("error = %v, want wrapping domain.ErrNotFound", err)
 	}
 }
 

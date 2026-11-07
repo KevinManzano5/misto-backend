@@ -40,6 +40,7 @@ type StoreRepository interface {
 	ListStores(ctx context.Context, limit, offset int32) ([]*domain.Store, error)
 	CountStores(ctx context.Context) (int64, error)
 	ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error)
+	UpdateAppUsageFeePercentage(ctx context.Context, storeID string, percentage int32) (*domain.Store, error)
 }
 
 // StoreRatingSummaryRepository interface (narrowed to what StoreUseCase needs to embed a store's
@@ -255,6 +256,21 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	}
 
 	return updatedStore, nil
+}
+
+// UpdateAppUsageFeePercentage sets the platform's app-usage fee percentage (0-100) for a store.
+// Admin-only: authorization is enforced by the handler/route, not here.
+func (usecase *StoreUseCase) UpdateAppUsageFeePercentage(ctx context.Context, storeID string, percentage int32) (*domain.Store, error) {
+	if percentage < 0 || percentage > 100 {
+		return nil, fmt.Errorf("fee percentage %d out of range: %w", percentage, domain.ErrInvalidInput)
+	}
+
+	store, err := usecase.repo.UpdateAppUsageFeePercentage(ctx, storeID, percentage)
+	if err != nil {
+		return nil, fmt.Errorf("updating app usage fee percentage: %w", err)
+	}
+
+	return store, nil
 }
 
 // BackfillMissingSlugs computes and persists a slug for every store that doesn't have one yet

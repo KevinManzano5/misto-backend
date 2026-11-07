@@ -78,6 +78,18 @@ func (usecase *StoreServiceUseCase) requireOwnedStore(ctx context.Context, store
 	return store, nil
 }
 
+// GetAppUsageFeePercentage returns the platform's app-usage fee percentage for storeID, used to
+// compute a service's total price. Public: no authorization check — the percentage itself stays
+// admin-only via the dedicated fee endpoints; only the resulting total price is exposed here.
+func (usecase *StoreServiceUseCase) GetAppUsageFeePercentage(ctx context.Context, storeID string) (int32, error) {
+	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
+	if err != nil {
+		return 0, fmt.Errorf("getting store: %w", err)
+	}
+
+	return store.AppUsageFeePercentage, nil
+}
+
 // requireAssignedCategory ensures categoryID is one of the categories currently assigned to storeID.
 func (usecase *StoreServiceUseCase) requireAssignedCategory(ctx context.Context, storeID, categoryID string) error {
 	categories, err := usecase.categoryRepo.ListCategoriesForStore(ctx, storeID)

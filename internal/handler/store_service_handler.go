@@ -32,13 +32,15 @@ func NewStoreServiceHandler(usecase *usecase.StoreServiceUseCase, validator *val
 
 // storeServiceResponse struct
 type storeServiceResponse struct {
-	ID                 string                         `json:"id"`
-	StoreID            string                         `json:"store_id"`
-	CategoryID         string                         `json:"category_id"`
-	Name               string                         `json:"name"`
-	Description        string                         `json:"description,omitempty"`
-	DurationMinutes    int32                          `json:"duration_minutes"`
-	Price              int64                          `json:"price"`
+	ID              string `json:"id"`
+	StoreID         string `json:"store_id"`
+	CategoryID      string `json:"category_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	DurationMinutes int32  `json:"duration_minutes"`
+	Price           int64  `json:"price"`
+	// TotalPrice is Price plus the platform's app usage fee, rounded to the nearest whole peso.
+	TotalPrice         int64                          `json:"total_price"`
 	IsActive           bool                           `json:"is_active"`
 	MinLeadTimeMinutes int32                          `json:"min_lead_time_minutes"`
 	Schedules          []storeServiceScheduleResponse `json:"schedules"`
@@ -46,8 +48,9 @@ type storeServiceResponse struct {
 	UpdatedAt          time.Time                      `json:"updated_at"`
 }
 
-// toStoreServiceResponse function
-func toStoreServiceResponse(service *domain.StoreService) storeServiceResponse {
+// toStoreServiceResponse function. totalPrice is service.Price plus the store's app usage fee,
+// already computed by the caller.
+func toStoreServiceResponse(service *domain.StoreService, totalPrice int64) storeServiceResponse {
 	return storeServiceResponse{
 		ID:                 service.ID,
 		StoreID:            service.StoreID,
@@ -56,6 +59,7 @@ func toStoreServiceResponse(service *domain.StoreService) storeServiceResponse {
 		Description:        service.Description,
 		DurationMinutes:    service.DurationMinutes,
 		Price:              service.Price,
+		TotalPrice:         totalPrice,
 		IsActive:           service.IsActive,
 		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 		CreatedAt:          service.CreatedAt,
@@ -116,8 +120,10 @@ func toStoreServiceScheduleResponse(schedule *domain.StoreServiceSchedule) store
 }
 
 // buildStoreServiceResponse composes a service's response, embedding its weekly schedule so
-// callers don't need a separate request to see it.
-func (handler *StoreServiceHandler) buildStoreServiceResponse(ctx context.Context, service *domain.StoreService) (storeServiceResponse, error) {
+// callers don't need a separate request to see it. feePercentage is the store's current app
+// usage fee percentage, used to compute TotalPrice; callers fetch it once per store (not per
+// service) to avoid an avoidable N+1 when listing several services for the same store.
+func (handler *StoreServiceHandler) buildStoreServiceResponse(ctx context.Context, service *domain.StoreService, feePercentage int32) (storeServiceResponse, error) {
 	schedules, err := handler.usecase.ListSchedules(ctx, service.ID)
 	if err != nil {
 		return storeServiceResponse{}, fmt.Errorf("listing store service schedules: %w", err)
@@ -128,7 +134,7 @@ func (handler *StoreServiceHandler) buildStoreServiceResponse(ctx context.Contex
 		scheduleResponses = append(scheduleResponses, toStoreServiceScheduleResponse(schedule))
 	}
 
-	response := toStoreServiceResponse(service)
+	response := toStoreServiceResponse(service, domain.ApplyPercentageFee(service.Price, feePercentage))
 	response.Schedules = scheduleResponses
 
 	return response, nil
@@ -136,23 +142,23 @@ func (handler *StoreServiceHandler) buildStoreServiceResponse(ctx context.Contex
 
 // createStoreServiceRequest struct
 type createStoreServiceRequest struct {
-	CategoryID         string  `json:"category_id" validate:"required,uuid"`
-	Name               string  `json:"name" validate:"required,min=2,max=100"`
-	Description        string  `json:"description" validate:"omitempty,max=1000"`
-	DurationMinutes    int32 `json:"duration_minutes" validate:"required,min=1"`
-	Price              int64 `json:"price" validate:"omitempty,min=0"`
-	MinLeadTimeMinutes int32 `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
+	CategoryID         string `json:"category_id" validate:"required,uuid"`
+	Name               string `json:"name" validate:"required,min=2,max=100"`
+	Description        string `json:"description" validate:"omitempty,max=1000"`
+	DurationMinutes    int32  `json:"duration_minutes" validate:"required,min=1"`
+	Price              int64  `json:"price" validate:"omitempty,min=0"`
+	MinLeadTimeMinutes int32  `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
 }
 
 // updateStoreServiceRequest struct
 type updateStoreServiceRequest struct {
-	CategoryID         *string  `json:"category_id" validate:"omitempty,uuid"`
-	Name               *string  `json:"name" validate:"omitempty,min=2,max=100"`
-	Description        *string  `json:"description" validate:"omitempty,max=1000"`
-	DurationMinutes    *int32 `json:"duration_minutes" validate:"omitempty,min=1"`
-	Price              *int64 `json:"price" validate:"omitempty,min=0"`
-	IsActive           *bool  `json:"is_active"`
-	MinLeadTimeMinutes *int32 `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
+	CategoryID         *string `json:"category_id" validate:"omitempty,uuid"`
+	Name               *string `json:"name" validate:"omitempty,min=2,max=100"`
+	Description        *string `json:"description" validate:"omitempty,max=1000"`
+	DurationMinutes    *int32  `json:"duration_minutes" validate:"omitempty,min=1"`
+	Price              *int64  `json:"price" validate:"omitempty,min=0"`
+	IsActive           *bool   `json:"is_active"`
+	MinLeadTimeMinutes *int32  `json:"min_lead_time_minutes" validate:"omitempty,min=0"`
 }
 
 // decodeJSONBody decodes a request body into dest, rejecting unknown fields and trailing data.
@@ -226,7 +232,13 @@ func (handler *StoreServiceHandler) Create(writer http.ResponseWriter, request *
 		return
 	}
 
-	response, err := handler.buildStoreServiceResponse(request.Context(), service)
+	feePercentage, err := handler.usecase.GetAppUsageFeePercentage(request.Context(), service.StoreID)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response, err := handler.buildStoreServiceResponse(request.Context(), service, feePercentage)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -294,7 +306,13 @@ func (handler *StoreServiceHandler) Update(writer http.ResponseWriter, request *
 		return
 	}
 
-	response, err := handler.buildStoreServiceResponse(request.Context(), service)
+	feePercentage, err := handler.usecase.GetAppUsageFeePercentage(request.Context(), service.StoreID)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response, err := handler.buildStoreServiceResponse(request.Context(), service, feePercentage)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -359,9 +377,15 @@ func (handler *StoreServiceHandler) ListByStore(writer http.ResponseWriter, requ
 		return
 	}
 
+	feePercentage, err := handler.usecase.GetAppUsageFeePercentage(request.Context(), storeID)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
 	response := make([]storeServiceResponse, 0, len(services))
 	for _, service := range services {
-		serviceResponse, err := handler.buildStoreServiceResponse(request.Context(), service)
+		serviceResponse, err := handler.buildStoreServiceResponse(request.Context(), service, feePercentage)
 		if err != nil {
 			RespondError(writer, request, handler.logger, err)
 			return

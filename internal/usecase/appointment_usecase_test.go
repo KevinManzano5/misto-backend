@@ -932,11 +932,16 @@ func TestUpdateStatus_ConfirmingCardAdvance_ChargesAndConfirms(t *testing.T) {
 	}
 	storeRepo := &fakeAppointmentStoreRepository{
 		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
-			return &domain.Store{ID: storeID, UserID: ownerID}, nil
+			return &domain.Store{ID: storeID, UserID: ownerID, AppUsageFeePercentage: 10}, nil
+		},
+	}
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: storeID, Price: 10000, IsActive: true}, nil
 		},
 	}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
 
 	updated, err := uc.UpdateStatus(context.Background(), appointmentID, ownerID, domain.AppointmentStatusConfirmed, "")
 	if err != nil {
@@ -950,6 +955,9 @@ func TestUpdateStatus_ConfirmingCardAdvance_ChargesAndConfirms(t *testing.T) {
 	}
 	if len(transactionRepo.created) != 1 || transactionRepo.created[0].Status != domain.PaymentStatusPaid {
 		t.Fatalf("expected exactly one paid payment transaction to be recorded, got %+v", transactionRepo.created)
+	}
+	if want := int64(11000); transactionRepo.created[0].Amount != want {
+		t.Errorf("expected recorded amount %d (price + 10%% fee), got %d", want, transactionRepo.created[0].Amount)
 	}
 }
 
@@ -975,11 +983,16 @@ func TestUpdateStatus_ConfirmingCardAdvance_ChargeFailsKeepsItPending(t *testing
 			return &domain.Store{ID: storeID, UserID: ownerID}, nil
 		},
 	}
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: storeID, Price: 10000, IsActive: true}, nil
+		},
+	}
 	processor := &fakePaymentProcessor{chargeFunc: func(ctx context.Context, appointment *domain.Appointment) error {
 		return errors.New("card declined")
 	}}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, processor, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, processor, transactionRepo, discardLogger())
 
 	_, err := uc.UpdateStatus(context.Background(), appointmentID, ownerID, domain.AppointmentStatusConfirmed, "")
 	if !errors.Is(err, domain.ErrPaymentFailed) {
@@ -1042,8 +1055,13 @@ func TestConfirmCashPayment(t *testing.T) {
 					return &domain.Store{ID: storeID, UserID: ownerID}, nil
 				},
 			}
+			serviceRepo := &fakeAppointmentStoreServiceRepository{
+				getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+					return &domain.StoreService{ID: id, StoreID: storeID, Price: 10000, IsActive: true}, nil
+				},
+			}
 			transactionRepo := &fakePaymentTransactionRepository{}
-			uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+			uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
 
 			updated, err := uc.ConfirmCashPayment(context.Background(), appointmentID, tt.requesterUserID)
 

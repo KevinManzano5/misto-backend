@@ -108,6 +108,21 @@ type storeResponse struct {
 	RatingCount              int64                   `json:"rating_count"`
 	CreatedAt                time.Time               `json:"created_at"`
 	UpdatedAt                time.Time               `json:"updated_at"`
+	// AppUsageFeePercentage is included only when the caller is a platform admin.
+	AppUsageFeePercentage *int32 `json:"app_usage_fee_percentage,omitempty"`
+}
+
+// updateStoreFeeRequest struct. Admin-only: kept separate from updateStoreRequest so the app
+// usage fee is never reachable through the store owner's own update flow.
+type updateStoreFeeRequest struct {
+	AppUsageFeePercentage int32 `json:"app_usage_fee_percentage" validate:"min=0,max=100"`
+}
+
+// storeFeeResponse struct. Admin-only: kept separate from storeResponse so the app usage fee is
+// never exposed to the store owner's own GET/update responses.
+type storeFeeResponse struct {
+	StoreID               string `json:"store_id"`
+	AppUsageFeePercentage int32  `json:"app_usage_fee_percentage"`
 }
 
 // replaceStoreCategoriesRequest struct
@@ -144,10 +159,17 @@ func toStoreCategoryResponse(category *domain.StoreCategory) storeCategoryRespon
 	}
 }
 
+// isAdminCaller reports whether the request carries claims for a platform admin.
+func isAdminCaller(request *http.Request) bool {
+	claims := middlewares.GetClaims(request)
+	return claims != nil && claims.Role == domain.RoleAdmin
+}
+
 // buildStoreResponse composes the full store response, embedding its assigned categories and
 // rating summary so callers don't need separate requests to see them. ratingSummary may be nil,
-// in which case the response's rating fields are left at their zero value.
-func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store, ratingSummary *domain.StoreRatingSummary) (storeResponse, error) {
+// in which case the response's rating fields are left at their zero value. isAdmin controls
+// whether the admin-only AppUsageFeePercentage is included.
+func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store, ratingSummary *domain.StoreRatingSummary, isAdmin bool) (storeResponse, error) {
 	categories, err := handler.categoryUsecase.ListStoreCategories(ctx, store.ID)
 	if err != nil {
 		return storeResponse{}, fmt.Errorf("listing store categories: %w", err)
@@ -165,7 +187,7 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		ratingCount = ratingSummary.RatingCount
 	}
 
-	return storeResponse{
+	response := storeResponse{
 		ID:                       store.ID,
 		UserID:                   store.UserID,
 		Name:                     store.Name,
@@ -188,19 +210,27 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		RatingCount:   ratingCount,
 		CreatedAt:     store.CreatedAt,
 		UpdatedAt:     store.UpdatedAt,
-	}, nil
+	}
+
+	if isAdmin {
+		fee := store.AppUsageFeePercentage
+		response.AppUsageFeePercentage = &fee
+	}
+
+	return response, nil
 }
 
 // buildStoreResponseWithRating fetches store's rating summary and composes its full response. Used
 // by every single-store endpoint (Create, Get, Update); ListStores fetches summaries in bulk
-// instead to avoid N+1 queries.
-func (handler *StoreHandler) buildStoreResponseWithRating(ctx context.Context, store *domain.Store) (storeResponse, error) {
+// instead to avoid N+1 queries. isAdmin controls whether the admin-only AppUsageFeePercentage is
+// included.
+func (handler *StoreHandler) buildStoreResponseWithRating(ctx context.Context, store *domain.Store, isAdmin bool) (storeResponse, error) {
 	summary, err := handler.usecase.GetRatingSummary(ctx, store.ID)
 	if err != nil {
 		return storeResponse{}, fmt.Errorf("getting store rating summary: %w", err)
 	}
 
-	return handler.buildStoreResponse(ctx, store, summary)
+	return handler.buildStoreResponse(ctx, store, summary, isAdmin)
 }
 
 // Create endpoint
@@ -279,7 +309,7 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store, isAdminCaller(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -316,7 +346,7 @@ func (handler *StoreHandler) GetStoreByID(writer http.ResponseWriter, request *h
 		return
 	}
 
-	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store, isAdminCaller(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -342,7 +372,7 @@ func (handler *StoreHandler) GetStoreByUserID(writer http.ResponseWriter, reques
 		return
 	}
 
-	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store, isAdminCaller(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -423,10 +453,107 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	response, err := handler.buildStoreResponseWithRating(request.Context(), store)
+	response, err := handler.buildStoreResponseWithRating(request.Context(), store, isAdminCaller(request))
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to create response JSON",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// GetStoreFee endpoint (GET /stores/{id}/fee). Admin-only: returns the platform's app usage fee
+// percentage for a store.
+func (handler *StoreHandler) GetStoreFee(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	store, err := handler.usecase.GetByID(request.Context(), id)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := storeFeeResponse{
+		StoreID:               store.ID,
+		AppUsageFeePercentage: store.AppUsageFeePercentage,
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// UpdateStoreFee endpoint (PATCH /stores/{id}/fee). Admin-only: sets the platform's app usage
+// fee percentage for a store.
+func (handler *StoreHandler) UpdateStoreFee(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req updateStoreFeeRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if decoder.More() {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrors := handler.validator.Validate(req); validationErrors != nil {
+		if err := RespondValidationError(writer, validationErrors); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"error trying to write validation response",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+		return
+	}
+
+	store, err := handler.usecase.UpdateAppUsageFeePercentage(request.Context(), id, req.AppUsageFeePercentage)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	response := storeFeeResponse{
+		StoreID:               store.ID,
+		AppUsageFeePercentage: store.AppUsageFeePercentage,
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
@@ -498,6 +625,8 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		return
 	}
 
+	isAdmin := isAdminCaller(request)
+
 	response := listStoresResponse{
 		Stores:     make([]storeResponse, 0, len(stores)),
 		TotalCount: total,
@@ -505,7 +634,7 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		PageSize:   pageSize,
 	}
 	for _, store := range stores {
-		storeWithSchedules, err := handler.buildStoreResponse(request.Context(), store, ratingSummaries[store.ID])
+		storeWithSchedules, err := handler.buildStoreResponse(request.Context(), store, ratingSummaries[store.ID], isAdmin)
 		if err != nil {
 			RespondError(writer, request, handler.logger, err)
 			return
