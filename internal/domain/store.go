@@ -37,12 +37,18 @@ type Store struct {
 	AllowSameDayAppointments bool
 	// PhoneNumber is the store's contact phone number, in E.164 format (e.g. "+573001234567").
 	PhoneNumber string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// CashOnSiteEnabled controls whether clients can choose to pay in cash at the store when
+	// booking an appointment.
+	CashOnSiteEnabled bool
+	// CardAdvanceEnabled controls whether clients can choose to pay by card in advance when
+	// booking an appointment.
+	CardAdvanceEnabled bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // NewStore function
-func NewStore(userID, name, slug, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string) *Store {
+func NewStore(userID, name, slug, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string, cashOnSiteEnabled, cardAdvanceEnabled bool) *Store {
 	now := time.Now()
 
 	return &Store{
@@ -58,6 +64,8 @@ func NewStore(userID, name, slug, description string, isActive bool, appointment
 		Address:                  address,
 		AllowSameDayAppointments: allowSameDayAppointments,
 		PhoneNumber:              phoneNumber,
+		CashOnSiteEnabled:        cashOnSiteEnabled,
+		CardAdvanceEnabled:       cardAdvanceEnabled,
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}

@@ -106,7 +106,7 @@ func (usecase *StoreUseCase) ListRatingSummaries(ctx context.Context, storeIDs [
 }
 
 // Create method creates a store
-func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string) (*domain.Store, error) {
+func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string, cashOnSiteEnabled, cardAdvanceEnabled bool) (*domain.Store, error) {
 	if appointmentDuration <= 0 {
 		appointmentDuration = defaultAppointmentDuration
 	}
@@ -118,7 +118,7 @@ func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, descripti
 	}
 
 	slug := domain.SlugFromName(name)
-	store := domain.NewStore(userID, name, slug, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber)
+	store := domain.NewStore(userID, name, slug, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber, cashOnSiteEnabled, cardAdvanceEnabled)
 
 	if err := usecase.repo.CreateStore(ctx, store); err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
@@ -194,7 +194,7 @@ func (usecase *StoreUseCase) List(ctx context.Context, page, pageSize int32) ([]
 }
 
 // Update method applies the supplied changes to a store and returns the persisted store.
-func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string, autoConfirmAppointments *bool, email, address *string, allowSameDayAppointments *bool, phoneNumber *string) (*domain.Store, error) {
+func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, description *string, isActive *bool, appointmentDuration *int32, timezone *string, autoConfirmAppointments *bool, email, address *string, allowSameDayAppointments *bool, phoneNumber *string, cashOnSiteEnabled, cardAdvanceEnabled *bool) (*domain.Store, error) {
 	store, err := usecase.repo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store to update: %w", err)
@@ -233,6 +233,12 @@ func (usecase *StoreUseCase) Update(ctx context.Context, storeID string, name, d
 	}
 	if phoneNumber != nil {
 		store.PhoneNumber = *phoneNumber
+	}
+	if cashOnSiteEnabled != nil {
+		store.CashOnSiteEnabled = *cashOnSiteEnabled
+	}
+	if cardAdvanceEnabled != nil {
+		store.CardAdvanceEnabled = *cardAdvanceEnabled
 	}
 
 	if !store.IsValid() {

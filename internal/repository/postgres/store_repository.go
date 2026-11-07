@@ -50,6 +50,8 @@ func toDomainStore(store postgres.Store) *domain.Store {
 		Address:                  address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              phoneNumber,
+		CashOnSiteEnabled:        store.CashOnSiteEnabled,
+		CardAdvanceEnabled:       store.CardAdvanceEnabled,
 		CreatedAt:                store.CreatedAt.Time.UTC(),
 		UpdatedAt:                store.UpdatedAt.Time.UTC(),
 	}
@@ -83,6 +85,8 @@ func (repo *StoreRepository) CreateStore(ctx context.Context, store *domain.Stor
 		Address:                  &store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              &store.PhoneNumber,
+		CashOnSiteEnabled:        store.CashOnSiteEnabled,
+		CardAdvanceEnabled:       store.CardAdvanceEnabled,
 	})
 
 	if err != nil {
@@ -180,6 +184,8 @@ func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Stor
 		Address:                  &store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              &store.PhoneNumber,
+		CashOnSiteEnabled:        store.CashOnSiteEnabled,
+		CardAdvanceEnabled:       store.CardAdvanceEnabled,
 	})
 
 	if err != nil {
