@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
     username,
@@ -21,7 +32,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5
 )
-RETURNING id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at
+RETURNING id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role
 `
 
 type CreateUserParams struct {
@@ -51,6 +62,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
@@ -66,7 +78,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at FROM users
+SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role FROM users
 WHERE email = $1
 LIMIT 1
 `
@@ -84,12 +96,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at FROM users
+SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role FROM users
 WHERE id = $1
 LIMIT 1
 `
@@ -107,12 +120,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at FROM users
+SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role FROM users
 WHERE username = $1
 LIMIT 1
 `
@@ -130,12 +144,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at FROM users
+SELECT id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -164,6 +179,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Role,
 		); err != nil {
 			return nil, err
 		}
@@ -183,7 +199,7 @@ SET
     is_active = COALESCE($4, is_active),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at
+RETURNING id, username, email, password_hash, first_name, last_name, is_active, created_at, updated_at, role
 `
 
 type UpdateUserParams struct {
@@ -211,6 +227,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }

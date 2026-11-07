@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countStores = `-- name: CountStores :one
+SELECT COUNT(*) FROM stores
+WHERE deleted_at IS NULL
+`
+
+func (q *Queries) CountStores(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countStores)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createStore = `-- name: CreateStore :one
 INSERT INTO stores (
     user_id,

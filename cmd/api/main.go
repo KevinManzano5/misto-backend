@@ -11,6 +11,7 @@ import (
 	_ "github.com/KevinManzano5/misto-backend/docs"
 	"github.com/KevinManzano5/misto-backend/internal/auth"
 	"github.com/KevinManzano5/misto-backend/internal/cache"
+	"github.com/KevinManzano5/misto-backend/internal/domain"
 	"github.com/KevinManzano5/misto-backend/internal/handler"
 	"github.com/KevinManzano5/misto-backend/internal/logger"
 	"github.com/KevinManzano5/misto-backend/internal/middlewares"
@@ -150,9 +151,10 @@ func main() {
 
 	// Initialization of specific middlewares
 	authMW := middlewares.RequireAuth(jwtManager, log)
+	adminMW := middlewares.RequireRole(domain.RoleAdmin, log)
 
 	// Routing injection
-	router.SetupRoutes(srv, handlers, authMW)
+	router.SetupRoutes(srv, handlers, authMW, adminMW)
 
 	// Server startup
 	if err := srv.Start(); err != nil {

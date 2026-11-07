@@ -22,6 +22,10 @@ WHERE deleted_at IS NULL
 ORDER BY name ASC
 LIMIT $1 OFFSET $2;
 
+-- name: CountStores :one
+SELECT COUNT(*) FROM stores
+WHERE deleted_at IS NULL;
+
 -- name: ListStoresWithoutSlug :many
 -- One-off backfill helper: stores created before the slug column existed (migration 000023)
 -- have slug = NULL.

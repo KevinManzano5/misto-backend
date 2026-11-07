@@ -419,9 +419,28 @@ func (handler *StoreHandler) DeleteStore(writer http.ResponseWriter, request *ht
 	}
 }
 
+// listStoresResponse struct
+type listStoresResponse struct {
+	Stores     []storeResponse `json:"stores"`
+	TotalCount int64           `json:"total_count"`
+	Page       int32           `json:"page"`
+	PageSize   int32           `json:"page_size"`
+}
+
 // ListStores endpoint
+//
+// @Summary     List stores
+// @Description Paginated list of active stores, ordered by name.
+// @Tags        stores
+// @Produce     json
+// @Param       page      query int false "Page number (default 1)"
+// @Param       page_size query int false "Page size (default 20, max 100)"
+// @Success     200 {object} listStoresResponse
+// @Router      /stores [get]
 func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *http.Request) {
-	stores, err := handler.usecase.List(request.Context())
+	page, pageSize := paginationParams(request, 1, 20)
+
+	stores, total, err := handler.usecase.List(request.Context(), page, pageSize)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -438,14 +457,19 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		return
 	}
 
-	response := make([]storeResponse, 0, len(stores))
+	response := listStoresResponse{
+		Stores:     make([]storeResponse, 0, len(stores)),
+		TotalCount: total,
+		Page:       page,
+		PageSize:   pageSize,
+	}
 	for _, store := range stores {
 		storeWithSchedules, err := handler.buildStoreResponse(request.Context(), store, ratingSummaries[store.ID])
 		if err != nil {
 			RespondError(writer, request, handler.logger, err)
 			return
 		}
-		response = append(response, storeWithSchedules)
+		response.Stores = append(response.Stores, storeWithSchedules)
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {

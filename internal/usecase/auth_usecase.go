@@ -93,7 +93,7 @@ func (usecase *AuthUseCase) SignUp(ctx context.Context, username, email, firstNa
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
-	tokens, err := usecase.generateTokenPair(ctx, user.ID, user.Email, "member")
+	tokens, err := usecase.generateTokenPair(ctx, user.ID, user.Email, user.Role)
 
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (usecase *AuthUseCase) SignIn(ctx context.Context, email, password string) 
 		return nil, fmt.Errorf("validating password: %w", err)
 	}
 
-	tokens, err := usecase.generateTokenPair(ctx, user.ID, user.Email, "member")
+	tokens, err := usecase.generateTokenPair(ctx, user.ID, user.Email, user.Role)
 
 	if err != nil {
 		return nil, err

@@ -14,6 +14,12 @@ const defaultAppointmentDuration = 30
 // defaultTimezone is applied to a store when it is created without one.
 const defaultTimezone = "America/Bogota"
 
+const (
+	defaultStoresPage     = 1
+	defaultStoresPageSize = 20
+	maxStoresPageSize     = 100
+)
+
 // validateTimezone checks that name is a loadable IANA timezone (e.g. "America/Bogota").
 func validateTimezone(name string) error {
 	if _, err := time.LoadLocation(name); err != nil {
@@ -31,7 +37,8 @@ type StoreRepository interface {
 	GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error)
 	UpdateStore(ctx context.Context, store *domain.Store) error
 	DeleteStore(ctx context.Context, id string) error
-	ListStores(ctx context.Context) ([]*domain.Store, error)
+	ListStores(ctx context.Context, limit, offset int32) ([]*domain.Store, error)
+	CountStores(ctx context.Context) (int64, error)
 	ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error)
 }
 
@@ -153,15 +160,37 @@ func (usecase *StoreUseCase) GetByUserID(ctx context.Context, userID string) (*d
 	return store, nil
 }
 
-// List method
-func (usecase *StoreUseCase) List(ctx context.Context) ([]*domain.Store, error) {
-	stores, err := usecase.repo.ListStores(ctx)
-
-	if err != nil {
-		return nil, fmt.Errorf("listing stores: %w", err)
+// List method returns a page of active stores ordered by name, along with the total count across
+// all pages. Public: no authorization check. page/pageSize are normalized with sane defaults and
+// an upper bound.
+func (usecase *StoreUseCase) List(ctx context.Context, page, pageSize int32) ([]*domain.Store, int64, error) {
+	if page < 1 {
+		page = defaultStoresPage
 	}
 
-	return stores, nil
+	if pageSize < 1 {
+		pageSize = defaultStoresPageSize
+	}
+
+	if pageSize > maxStoresPageSize {
+		pageSize = maxStoresPageSize
+	}
+
+	offset := (page - 1) * pageSize
+
+	stores, err := usecase.repo.ListStores(ctx, pageSize, offset)
+
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing stores: %w", err)
+	}
+
+	total, err := usecase.repo.CountStores(ctx)
+
+	if err != nil {
+		return nil, 0, fmt.Errorf("counting stores: %w", err)
+	}
+
+	return stores, total, nil
 }
 
 // Update method applies the supplied changes to a store and returns the persisted store.

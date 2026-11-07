@@ -2,6 +2,13 @@ package domain
 
 import "time"
 
+const (
+	// RoleMember is the default role assigned to every self-registered user.
+	RoleMember = "member"
+	// RoleAdmin grants access to system-wide administration capabilities.
+	RoleAdmin = "admin"
+)
+
 // User struct represents system user
 type User struct {
 	ID           string
@@ -11,6 +18,7 @@ type User struct {
 	FirstName    string
 	LastName     string
 	IsActive     bool
+	Role         string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -26,6 +34,7 @@ func NewUser(username, email, passwordHash, firstName, lastName string, isActive
 		FirstName:    firstName,
 		LastName:     lastName,
 		IsActive:     isActive,
+		Role:         RoleMember,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

@@ -22,9 +22,9 @@ type AppHandlers struct {
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
-func SetupRoutes(srv *server.Server, h *AppHandlers, authMW middlewares.Middleware) {
+func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW middlewares.Middleware) {
 	setupSystemRoutes(srv, h.Health)
-	setupAuthRoutes(srv, h.Auth, h.User, authMW)
+	setupAuthRoutes(srv, h.Auth, h.User, authMW, adminMW)
 	setupStoreRoutes(srv, h.Store, authMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
@@ -39,7 +39,7 @@ func setupSystemRoutes(srv *server.Server, health http.Handler) {
 }
 
 // setupAuthRoutes registers endpoints related to authentication and basic user management (mixed)
-func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handler.UserHandler, authMW middlewares.Middleware) {
+func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handler.UserHandler, authMW, adminMW middlewares.Middleware) {
 	srv.RegisterRoutes("POST /api/v1/auth/sign_up", http.HandlerFunc(auth.SignUp))
 	srv.RegisterRoutes("POST /api/v1/auth/sign_in", http.HandlerFunc(auth.SignIn))
 	srv.RegisterRoutes("POST /api/v1/auth/sign_out", http.HandlerFunc(auth.SignOut))
@@ -51,6 +51,9 @@ func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handle
 
 	// Consider protecting this route with authMW in the future if profiles are private.
 	srv.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(user.Get))
+
+	// Admin-only
+	srv.RegisterRoutes("GET /api/v1/users", middlewares.Chain(http.HandlerFunc(user.ListUsers), authMW, adminMW))
 }
 
 // setupStoreRoutes registers endpoints for managing stores (mixed).

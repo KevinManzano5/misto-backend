@@ -40,7 +40,11 @@ func (f *fakeStoreRepository) DeleteStore(ctx context.Context, id string) error 
 	panic("not implemented")
 }
 
-func (f *fakeStoreRepository) ListStores(ctx context.Context) ([]*domain.Store, error) {
+func (f *fakeStoreRepository) ListStores(ctx context.Context, limit, offset int32) ([]*domain.Store, error) {
+	panic("not implemented")
+}
+
+func (f *fakeStoreRepository) CountStores(ctx context.Context) (int64, error) {
 	panic("not implemented")
 }
 
