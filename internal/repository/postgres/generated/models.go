@@ -52,6 +52,8 @@ type Store struct {
 	AllowSameDayAppointments bool               `json:"allow_same_day_appointments"`
 	PhoneNumber              *string            `json:"phone_number"`
 	Slug                     *string            `json:"slug"`
+	CashOnSiteEnabled        bool               `json:"cash_on_site_enabled"`
+	CardAdvanceEnabled       bool               `json:"card_advance_enabled"`
 }
 
 type StoreCategory struct {

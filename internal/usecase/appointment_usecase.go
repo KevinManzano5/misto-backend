@@ -135,6 +135,13 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 		return nil, fmt.Errorf("getting store: %w", err)
 	}
 
+	if paymentMethod == domain.PaymentMethodCashOnSite && !store.CashOnSiteEnabled {
+		return nil, fmt.Errorf("%w: cash_on_site payment method is disabled for this store", domain.ErrInvalidInput)
+	}
+	if paymentMethod == domain.PaymentMethodCardAdvance && !store.CardAdvanceEnabled {
+		return nil, fmt.Errorf("%w: card_advance payment method is disabled for this store", domain.ErrInvalidInput)
+	}
+
 	service, err := usecase.resolveService(ctx, storeID, serviceID)
 	if err != nil {
 		return nil, err

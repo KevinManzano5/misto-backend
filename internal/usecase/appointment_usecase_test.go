@@ -433,6 +433,8 @@ func newCreateTestStores(autoConfirm bool) (*fakeAppointmentStoreRepository, *fa
 				AppointmentDuration:      30,
 				AllowSameDayAppointments: true,
 				AutoConfirmAppointments:  autoConfirm,
+				CashOnSiteEnabled:        true,
+				CardAdvanceEnabled:       true,
 			}, nil
 		},
 	}
@@ -457,6 +459,34 @@ func TestCreate_RejectsInvalidPaymentMethod(t *testing.T) {
 	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", "bitcoin", time.Now().Add(time.Hour))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_RejectsCashOnSiteWhenStoreDisablesIt(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: false, CardAdvanceEnabled: true}, nil
+		},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_RejectsCardAdvanceWhenStoreDisablesIt(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: true, CardAdvanceEnabled: false}, nil
+		},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
 	}

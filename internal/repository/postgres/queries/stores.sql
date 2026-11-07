@@ -10,9 +10,11 @@ INSERT INTO stores (
     email,
     address,
     allow_same_day_appointments,
-    phone_number
+    phone_number,
+    cash_on_site_enabled,
+    card_advance_enabled
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 RETURNING *;
 
@@ -64,6 +66,8 @@ SET
     address = COALESCE($10, address),
     allow_same_day_appointments = COALESCE($11, allow_same_day_appointments),
     phone_number = COALESCE($12, phone_number),
+    cash_on_site_enabled = COALESCE($13, cash_on_site_enabled),
+    card_advance_enabled = COALESCE($14, card_advance_enabled),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
   AND deleted_at IS NULL

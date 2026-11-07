@@ -54,6 +54,9 @@ type createStoreRequest struct {
 	AllowSameDayAppointments *bool `json:"allow_same_day_appointments"`
 	// PhoneNumber is the store's contact phone number, in E.164 format (e.g. "+573001234567").
 	PhoneNumber string `json:"phone_number" validate:"omitempty,e164"`
+	// PaymentMethods controls which payment methods clients can choose when booking. Any method
+	// omitted (or the whole object omitted) defaults to enabled.
+	PaymentMethods *paymentMethodsRequest `json:"payment_methods"`
 }
 
 type updateStoreRequest struct {
@@ -67,6 +70,22 @@ type updateStoreRequest struct {
 	Address                  *string `json:"address"`
 	AllowSameDayAppointments *bool   `json:"allow_same_day_appointments"`
 	PhoneNumber              *string `json:"phone_number" validate:"omitempty,e164"`
+	// PaymentMethods controls which payment methods clients can choose when booking. Only the
+	// methods present in the object are changed; the others are left untouched.
+	PaymentMethods *paymentMethodsRequest `json:"payment_methods"`
+}
+
+// paymentMethodsRequest groups the per-method enable/disable toggles accepted on store
+// create/update requests. A nil field leaves that method's current/default value untouched.
+type paymentMethodsRequest struct {
+	CashOnSite  *bool `json:"cash_on_site"`
+	CardAdvance *bool `json:"card_advance"`
+}
+
+// paymentMethodsResponse groups the per-method enabled flags in a store response.
+type paymentMethodsResponse struct {
+	CashOnSite  bool `json:"cash_on_site"`
+	CardAdvance bool `json:"card_advance"`
 }
 
 type storeResponse struct {
@@ -83,6 +102,7 @@ type storeResponse struct {
 	Address                  string                  `json:"address"`
 	AllowSameDayAppointments bool                    `json:"allow_same_day_appointments"`
 	PhoneNumber              string                  `json:"phone_number"`
+	PaymentMethods           paymentMethodsResponse  `json:"payment_methods"`
 	Categories               []storeCategoryResponse `json:"categories"`
 	AverageRating            float64                 `json:"average_rating"`
 	RatingCount              int64                   `json:"rating_count"`
@@ -159,11 +179,15 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		Address:                  store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              store.PhoneNumber,
-		Categories:               categoryResponses,
-		AverageRating:            averageRating,
-		RatingCount:              ratingCount,
-		CreatedAt:                store.CreatedAt,
-		UpdatedAt:                store.UpdatedAt,
+		PaymentMethods: paymentMethodsResponse{
+			CashOnSite:  store.CashOnSiteEnabled,
+			CardAdvance: store.CardAdvanceEnabled,
+		},
+		Categories:    categoryResponses,
+		AverageRating: averageRating,
+		RatingCount:   ratingCount,
+		CreatedAt:     store.CreatedAt,
+		UpdatedAt:     store.UpdatedAt,
 	}, nil
 }
 
@@ -238,7 +262,18 @@ func (handler *StoreHandler) Create(writer http.ResponseWriter, request *http.Re
 		allowSameDayAppointments = *req.AllowSameDayAppointments
 	}
 
-	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments, req.Email, req.Address, allowSameDayAppointments, req.PhoneNumber)
+	cashOnSiteEnabled := true
+	cardAdvanceEnabled := true
+	if req.PaymentMethods != nil {
+		if req.PaymentMethods.CashOnSite != nil {
+			cashOnSiteEnabled = *req.PaymentMethods.CashOnSite
+		}
+		if req.PaymentMethods.CardAdvance != nil {
+			cardAdvanceEnabled = *req.PaymentMethods.CardAdvance
+		}
+	}
+
+	store, err := handler.usecase.Create(request.Context(), userID, req.Name, req.Description, true, req.AppointmentDuration, req.Timezone, autoConfirmAppointments, req.Email, req.Address, allowSameDayAppointments, req.PhoneNumber, cashOnSiteEnabled, cardAdvanceEnabled)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return
@@ -358,7 +393,7 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil && req.Email == nil && req.Address == nil && req.AllowSameDayAppointments == nil && req.PhoneNumber == nil {
+	if req.Name == nil && req.Description == nil && req.IsActive == nil && req.AppointmentDuration == nil && req.Timezone == nil && req.AutoConfirmAppointments == nil && req.Email == nil && req.Address == nil && req.AllowSameDayAppointments == nil && req.PhoneNumber == nil && req.PaymentMethods == nil {
 		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
 		return
 	}
@@ -376,7 +411,13 @@ func (handler *StoreHandler) UpdateStore(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments, req.Email, req.Address, req.AllowSameDayAppointments, req.PhoneNumber)
+	var cashOnSiteEnabled, cardAdvanceEnabled *bool
+	if req.PaymentMethods != nil {
+		cashOnSiteEnabled = req.PaymentMethods.CashOnSite
+		cardAdvanceEnabled = req.PaymentMethods.CardAdvance
+	}
+
+	store, err := handler.usecase.Update(request.Context(), id, req.Name, req.Description, req.IsActive, req.AppointmentDuration, req.Timezone, req.AutoConfirmAppointments, req.Email, req.Address, req.AllowSameDayAppointments, req.PhoneNumber, cashOnSiteEnabled, cardAdvanceEnabled)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

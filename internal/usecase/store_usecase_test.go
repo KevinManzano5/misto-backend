@@ -74,7 +74,7 @@ func TestCreate_SetsSlugFromName(t *testing.T) {
 	}
 	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
-	_, err := uc.Create(context.Background(), "user-1", "Café Sol", "desc", true, 30, "America/Bogota", true, "", "", true, "")
+	_, err := uc.Create(context.Background(), "user-1", "Café Sol", "desc", true, 30, "America/Bogota", true, "", "", true, "", true, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestUpdate_NameChangeRecomputesSlug(t *testing.T) {
 	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	newName := "New Name"
-	_, err := uc.Update(context.Background(), "store-1", &newName, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	_, err := uc.Update(context.Background(), "store-1", &newName, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -124,12 +124,40 @@ func TestUpdate_NoNameChangeKeepsSlug(t *testing.T) {
 	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	newDescription := "updated description"
-	_, err := uc.Update(context.Background(), "store-1", nil, &newDescription, nil, nil, nil, nil, nil, nil, nil, nil)
+	_, err := uc.Update(context.Background(), "store-1", nil, &newDescription, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if captured.Slug != "same-name" {
 		t.Errorf("expected Slug to remain %q, got %q", "same-name", captured.Slug)
+	}
+}
+
+func TestUpdate_TogglesPaymentMethods(t *testing.T) {
+	existing := &domain.Store{ID: "store-1", UserID: "user-1", Name: "Store", Slug: "store", AppointmentDuration: 30, Timezone: "America/Bogota", CashOnSiteEnabled: true, CardAdvanceEnabled: true}
+
+	var captured *domain.Store
+	repo := &fakeStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, id string) (*domain.Store, error) {
+			return existing, nil
+		},
+		updateStoreFunc: func(ctx context.Context, store *domain.Store) error {
+			captured = store
+			return nil
+		},
+	}
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
+
+	cashOnSiteEnabled := false
+	_, err := uc.Update(context.Background(), "store-1", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &cashOnSiteEnabled, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if captured.CashOnSiteEnabled {
+		t.Error("expected CashOnSiteEnabled to be false")
+	}
+	if !captured.CardAdvanceEnabled {
+		t.Error("expected CardAdvanceEnabled to remain true")
 	}
 }
 
