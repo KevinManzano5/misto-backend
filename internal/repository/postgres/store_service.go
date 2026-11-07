@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
 	postgres "github.com/KevinManzano5/misto-backend/internal/repository/postgres/generated"
@@ -29,15 +28,10 @@ func NewStoreServiceRepository(pool *pgxpool.Pool) *StoreServiceRepository {
 }
 
 // toDomainStoreService function
-func toDomainStoreService(service postgres.StoreService) (*domain.StoreService, error) {
+func toDomainStoreService(service postgres.StoreService) *domain.StoreService {
 	var description string
 	if service.Description != nil {
 		description = *service.Description
-	}
-
-	price, err := service.Price.Float64Value()
-	if err != nil {
-		return nil, fmt.Errorf("decoding store service price: %w", err)
 	}
 
 	return &domain.StoreService{
@@ -47,23 +41,12 @@ func toDomainStoreService(service postgres.StoreService) (*domain.StoreService, 
 		Name:               service.Name,
 		Description:        description,
 		DurationMinutes:    service.DurationMinutes,
-		Price:              price.Float64,
+		Price:              service.Price,
 		IsActive:           service.IsActive,
 		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 		CreatedAt:          service.CreatedAt.Time.UTC(),
 		UpdatedAt:          service.UpdatedAt.Time.UTC(),
-	}, nil
-}
-
-// toPgNumericPrice converts a domain price (float64) into the pgtype.Numeric sqlc expects.
-func toPgNumericPrice(price float64) (pgtype.Numeric, error) {
-	var numeric pgtype.Numeric
-
-	if err := numeric.Scan(strconv.FormatFloat(price, 'f', 2, 64)); err != nil {
-		return pgtype.Numeric{}, fmt.Errorf("invalid price: %w", domain.ErrInvalidInput)
 	}
-
-	return numeric, nil
 }
 
 // translateStoreServiceWriteError maps known Postgres constraint violations from writing a
@@ -88,11 +71,6 @@ func (repo *StoreServiceRepository) CreateStoreService(ctx context.Context, serv
 		return fmt.Errorf("invalid categoryID: %w", domain.ErrInvalidInput)
 	}
 
-	price, err := toPgNumericPrice(service.Price)
-	if err != nil {
-		return err
-	}
-
 	var description *string
 	if service.Description != "" {
 		description = &service.Description
@@ -104,19 +82,14 @@ func (repo *StoreServiceRepository) CreateStoreService(ctx context.Context, serv
 		Name:               service.Name,
 		Description:        description,
 		DurationMinutes:    service.DurationMinutes,
-		Price:              price,
+		Price:              service.Price,
 		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 	})
 	if err != nil {
 		return translateStoreServiceWriteError(err)
 	}
 
-	created, err := toDomainStoreService(result)
-	if err != nil {
-		return err
-	}
-
-	*service = *created
+	*service = *toDomainStoreService(result)
 
 	return nil
 }
@@ -132,11 +105,6 @@ func (repo *StoreServiceRepository) CreateStoreServiceWithSchedules(ctx context.
 	}
 	if err := categoryID.Scan(service.CategoryID); err != nil {
 		return fmt.Errorf("invalid categoryID: %w", domain.ErrInvalidInput)
-	}
-
-	price, err := toPgNumericPrice(service.Price)
-	if err != nil {
-		return err
 	}
 
 	var description *string
@@ -160,18 +128,14 @@ func (repo *StoreServiceRepository) CreateStoreServiceWithSchedules(ctx context.
 		Name:               service.Name,
 		Description:        description,
 		DurationMinutes:    service.DurationMinutes,
-		Price:              price,
+		Price:              service.Price,
 		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 	})
 	if err != nil {
 		return translateStoreServiceWriteError(err)
 	}
 
-	created, err := toDomainStoreService(result)
-	if err != nil {
-		return err
-	}
-	*service = *created
+	*service = *toDomainStoreService(result)
 
 	var serviceID pgtype.UUID
 	if err := serviceID.Scan(service.ID); err != nil {
@@ -231,7 +195,7 @@ func (repo *StoreServiceRepository) GetStoreServiceByID(ctx context.Context, id 
 		return nil, fmt.Errorf("getting store service %s: %w", id, err)
 	}
 
-	return toDomainStoreService(result)
+	return toDomainStoreService(result), nil
 }
 
 // ListStoreServicesByStore method returns the active services offered by a store, ordered by name.
@@ -271,11 +235,7 @@ func (repo *StoreServiceRepository) ListAllStoreServicesByStore(ctx context.Cont
 func toDomainStoreServices(results []postgres.StoreService) ([]*domain.StoreService, error) {
 	services := make([]*domain.StoreService, 0, len(results))
 	for _, result := range results {
-		service, err := toDomainStoreService(result)
-		if err != nil {
-			return nil, err
-		}
-		services = append(services, service)
+		services = append(services, toDomainStoreService(result))
 	}
 
 	return services, nil
@@ -292,11 +252,6 @@ func (repo *StoreServiceRepository) UpdateStoreService(ctx context.Context, serv
 		return nil, fmt.Errorf("invalid categoryID: %w", domain.ErrInvalidInput)
 	}
 
-	price, err := toPgNumericPrice(service.Price)
-	if err != nil {
-		return nil, err
-	}
-
 	var description *string
 	if service.Description != "" {
 		description = &service.Description
@@ -308,7 +263,7 @@ func (repo *StoreServiceRepository) UpdateStoreService(ctx context.Context, serv
 		Name:               service.Name,
 		Description:        description,
 		DurationMinutes:    service.DurationMinutes,
-		Price:              price,
+		Price:              service.Price,
 		IsActive:           service.IsActive,
 		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
 	})
@@ -319,7 +274,7 @@ func (repo *StoreServiceRepository) UpdateStoreService(ctx context.Context, serv
 		return nil, translateStoreServiceWriteError(err)
 	}
 
-	return toDomainStoreService(result)
+	return toDomainStoreService(result), nil
 }
 
 // DeleteStoreService method

@@ -24,8 +24,9 @@ type Appointment struct {
 }
 
 type PaymentTransaction struct {
-	ID            pgtype.UUID        `json:"id"`
-	AppointmentID pgtype.UUID        `json:"appointment_id"`
+	ID            pgtype.UUID `json:"id"`
+	AppointmentID pgtype.UUID `json:"appointment_id"`
+	// Amount in whole Colombian pesos (COP); COP has no decimal subunit.
 	Amount        int64              `json:"amount"`
 	Currency      string             `json:"currency"`
 	Status        string             `json:"status"`
@@ -80,13 +81,14 @@ type StoreRating struct {
 }
 
 type StoreService struct {
-	ID                 pgtype.UUID        `json:"id"`
-	StoreID            pgtype.UUID        `json:"store_id"`
-	CategoryID         pgtype.UUID        `json:"category_id"`
-	Name               string             `json:"name"`
-	Description        *string            `json:"description"`
-	DurationMinutes    int32              `json:"duration_minutes"`
-	Price              pgtype.Numeric     `json:"price"`
+	ID              pgtype.UUID `json:"id"`
+	StoreID         pgtype.UUID `json:"store_id"`
+	CategoryID      pgtype.UUID `json:"category_id"`
+	Name            string      `json:"name"`
+	Description     *string     `json:"description"`
+	DurationMinutes int32       `json:"duration_minutes"`
+	// Price in whole Colombian pesos (COP); COP has no decimal subunit.
+	Price              int64              `json:"price"`
 	IsActive           bool               `json:"is_active"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`

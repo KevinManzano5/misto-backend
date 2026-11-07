@@ -98,7 +98,7 @@ func (usecase *StoreServiceUseCase) requireAssignedCategory(ctx context.Context,
 // day 09:00-18:00, except Sunday which is closed), which the owner can later customize. Only the
 // store's owner may call this, and categoryID must be one of the categories currently assigned
 // to the store.
-func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, requesterUserID, categoryID, name, description string, durationMinutes int32, price float64, minLeadTimeMinutes int32) (*domain.StoreService, error) {
+func (usecase *StoreServiceUseCase) Create(ctx context.Context, storeID, requesterUserID, categoryID, name, description string, durationMinutes int32, price int64, minLeadTimeMinutes int32) (*domain.StoreService, error) {
 	if _, err := usecase.requireOwnedStore(ctx, storeID, requesterUserID); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func defaultWeeklyServiceSchedules() []*domain.StoreServiceSchedule {
 
 // Update applies partial changes to an existing service. Only the store's owner may call this,
 // and a new categoryID (if given) must be one of the categories currently assigned to the store.
-func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID, requesterUserID string, categoryID, name, description *string, durationMinutes *int32, price *float64, isActive *bool, minLeadTimeMinutes *int32) (*domain.StoreService, error) {
+func (usecase *StoreServiceUseCase) Update(ctx context.Context, serviceID, requesterUserID string, categoryID, name, description *string, durationMinutes *int32, price *int64, isActive *bool, minLeadTimeMinutes *int32) (*domain.StoreService, error) {
 	service, err := usecase.repo.GetStoreServiceByID(ctx, serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store service: %w", err)

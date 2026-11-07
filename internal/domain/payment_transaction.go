@@ -11,8 +11,8 @@ import "time"
 type PaymentTransaction struct {
 	ID            string
 	AppointmentID string
-	// Amount is in the smallest currency unit (cents). Always 0 today: no pricing model exists
-	// yet, this is a placeholder for a future pricing iteration, not a bug.
+	// Amount is in whole Colombian pesos (COP); COP has no decimal subunit. Always 0 today: no
+	// pricing model exists yet, this is a placeholder for a future pricing iteration, not a bug.
 	Amount   int64
 	Currency string
 	// Status reuses PaymentStatusPending/PaymentStatusPaid/PaymentStatusFailed.
@@ -25,15 +25,15 @@ type PaymentTransaction struct {
 	CreatedAt     time.Time
 }
 
-// defaultPaymentTransactionCurrency is the placeholder currency used until a real pricing model
-// introduces multi-currency support.
-const defaultPaymentTransactionCurrency = "usd"
+// defaultPaymentTransactionCurrency is the only currency this app supports (Colombian pesos).
+const defaultPaymentTransactionCurrency = "cop"
 
-// NewPaymentTransaction constructor. amountCents is always 0 until a real pricing model exists.
-func NewPaymentTransaction(appointmentID string, amountCents int64, status, paymentMethod, failureReason string) *PaymentTransaction {
+// NewPaymentTransaction constructor. amount is in whole COP, always 0 until a real pricing model
+// exists.
+func NewPaymentTransaction(appointmentID string, amount int64, status, paymentMethod, failureReason string) *PaymentTransaction {
 	return &PaymentTransaction{
 		AppointmentID: appointmentID,
-		Amount:        amountCents,
+		Amount:        amount,
 		Currency:      defaultPaymentTransactionCurrency,
 		Status:        status,
 		PaymentMethod: paymentMethod,
