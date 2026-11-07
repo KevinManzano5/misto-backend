@@ -23,6 +23,14 @@ type Appointment struct {
 	ServiceID          pgtype.UUID        `json:"service_id"`
 }
 
+type PaymentMethodSetting struct {
+	ID                 int16              `json:"id"`
+	CashOnSiteEnabled  bool               `json:"cash_on_site_enabled"`
+	CardAdvanceEnabled bool               `json:"card_advance_enabled"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PaymentTransaction struct {
 	ID            pgtype.UUID `json:"id"`
 	AppointmentID pgtype.UUID `json:"appointment_id"`

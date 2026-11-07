@@ -11,19 +11,20 @@ import (
 
 // AppHandlers groups all instantiated handlers to facilitate dependency injection.
 type AppHandlers struct {
-	Health        http.Handler
-	User          *handler.UserHandler
-	Auth          *handler.AuthHandler
-	Store         *handler.StoreHandler
-	Appointment   *handler.AppointmentHandler
-	StoreRating   *handler.StoreRatingHandler
-	StoreCategory *handler.StoreCategoryHandler
-	StoreService  *handler.StoreServiceHandler
+	Health                http.Handler
+	User                  *handler.UserHandler
+	Auth                  *handler.AuthHandler
+	Store                 *handler.StoreHandler
+	Appointment           *handler.AppointmentHandler
+	StoreRating           *handler.StoreRatingHandler
+	StoreCategory         *handler.StoreCategoryHandler
+	StoreService          *handler.StoreServiceHandler
+	PaymentMethodSettings *handler.PaymentMethodSettingsHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
 func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW, optionalAuthMW middlewares.Middleware) {
-	setupSystemRoutes(srv, h.Health)
+	setupSystemRoutes(srv, h.Health, h.PaymentMethodSettings, authMW, adminMW)
 	setupAuthRoutes(srv, h.Auth, h.User, authMW, adminMW)
 	setupStoreRoutes(srv, h.Store, authMW, adminMW, optionalAuthMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
@@ -32,10 +33,15 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW, optionalAu
 	setupStoreServiceRoutes(srv, h.StoreService, authMW)
 }
 
-// setupSystemRoutes registers health and documentation endpoints (public)
-func setupSystemRoutes(srv *server.Server, health http.Handler) {
+// setupSystemRoutes registers health/documentation endpoints (public) and platform-wide payment
+// method settings (admin-only).
+func setupSystemRoutes(srv *server.Server, health http.Handler, paymentMethods *handler.PaymentMethodSettingsHandler, authMW, adminMW middlewares.Middleware) {
 	srv.RegisterRoutes("GET /docs/", httpSwagger.WrapHandler)
 	srv.RegisterRoutes("GET /health", health)
+
+	// Admin-only. Toggling a method here overrides every store's own per-store setting.
+	srv.RegisterRoutes("GET /api/v1/payment-methods", middlewares.Chain(http.HandlerFunc(paymentMethods.Get), authMW, adminMW))
+	srv.RegisterRoutes("PATCH /api/v1/payment-methods", middlewares.Chain(http.HandlerFunc(paymentMethods.Update), authMW, adminMW))
 }
 
 // setupAuthRoutes registers endpoints related to authentication and basic user management (mixed)
