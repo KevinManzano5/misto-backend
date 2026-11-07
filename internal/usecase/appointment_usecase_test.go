@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +81,26 @@ func (f *fakeAppointmentStoreRepository) GetStoreByID(ctx context.Context, store
 	return f.getStoreByIDFunc(ctx, storeID)
 }
 
+// fakePaymentMethodSettingsRepository is a minimal AppointmentPaymentMethodSettingsRepository
+// test double.
+type fakePaymentMethodSettingsRepository struct {
+	settings *domain.PaymentMethodSettings
+	err      error
+}
+
+func (f *fakePaymentMethodSettingsRepository) GetPaymentMethodSettings(ctx context.Context) (*domain.PaymentMethodSettings, error) {
+	return f.settings, f.err
+}
+
+// enabledPaymentMethodSettingsRepo returns a fake with both payment methods enabled
+// platform-wide, the default used by tests that are not specifically exercising the global
+// toggle.
+func enabledPaymentMethodSettingsRepo() *fakePaymentMethodSettingsRepository {
+	return &fakePaymentMethodSettingsRepository{
+		settings: &domain.PaymentMethodSettings{CashOnSiteEnabled: true, CardAdvanceEnabled: true},
+	}
+}
+
 // fakeStoreServiceScheduleRepository is a minimal AppointmentStoreServiceScheduleRepository test
 // double.
 type fakeStoreServiceScheduleRepository struct {
@@ -140,7 +161,7 @@ func TestExpireOverdueAppointments_ReturnsCountFromRepository(t *testing.T) {
 			}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	count, err := uc.ExpireOverdueAppointments(context.Background())
 	if err != nil {
@@ -238,7 +259,7 @@ func TestListMyAppointments_ReturnsAppointmentsFromRepository(t *testing.T) {
 			}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointments, err := uc.ListMyAppointments(context.Background(), userID)
 	if err != nil {
@@ -256,7 +277,7 @@ func TestListMyAppointments_WrapsRepositoryError(t *testing.T) {
 			return nil, repoErr
 		},
 	}
-	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.ListMyAppointments(context.Background(), "client-1")
 	if !errors.Is(err, repoErr) {
@@ -294,7 +315,7 @@ func TestGetActiveAppointmentStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeAppointmentRepository{getActiveAppointmentByStoreAndClientFunc: tt.repoFunc}
-			uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+			uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 			got, err := uc.GetActiveAppointmentStatus(context.Background(), "store-1", "client-1")
 
@@ -377,7 +398,7 @@ func TestCancel(t *testing.T) {
 					return &domain.Store{ID: storeID, UserID: ownerID}, nil
 				},
 			}
-			uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+			uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 			cancelled, err := uc.Cancel(context.Background(), appointmentID, tt.requesterUserID, "no longer needed")
 
@@ -398,7 +419,7 @@ func TestCancel(t *testing.T) {
 }
 
 func TestCancel_RejectsEmptyReason(t *testing.T) {
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, &fakeAppointmentStoreRepository{}, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, &fakeAppointmentStoreRepository{}, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	if _, err := uc.Cancel(context.Background(), "appointment-1", "client-1", "   "); !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
@@ -412,7 +433,7 @@ func TestExpireOverdueAppointments_WrapsRepositoryError(t *testing.T) {
 			return nil, repoErr
 		},
 	}
-	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.ExpireOverdueAppointments(context.Background())
 	if !errors.Is(err, repoErr) {
@@ -456,7 +477,7 @@ func newCreateTestStores(autoConfirm bool) (*fakeAppointmentStoreRepository, *fa
 }
 
 func TestCreate_RejectsInvalidPaymentMethod(t *testing.T) {
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, nil, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", "bitcoin", time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -470,7 +491,7 @@ func TestCreate_RejectsCashOnSiteWhenStoreDisablesIt(t *testing.T) {
 			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: false, CardAdvanceEnabled: true}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -484,11 +505,77 @@ func TestCreate_RejectsCardAdvanceWhenStoreDisablesIt(t *testing.T) {
 			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: true, CardAdvanceEnabled: false}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_RejectsCashOnSiteWhenDisabledPlatformWide(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: true, CardAdvanceEnabled: true}, nil
+		},
+	}
+	settingsRepo := &fakePaymentMethodSettingsRepository{
+		settings: &domain.PaymentMethodSettings{CashOnSiteEnabled: false, CardAdvanceEnabled: true},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, settingsRepo, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_RejectsCardAdvanceWhenDisabledPlatformWide(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: true, CardAdvanceEnabled: true}, nil
+		},
+	}
+	settingsRepo := &fakePaymentMethodSettingsRepository{
+		settings: &domain.PaymentMethodSettings{CashOnSiteEnabled: true, CardAdvanceEnabled: false},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, settingsRepo, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_RejectsCashOnSiteWhenStoreDisablesItEvenIfGloballyEnabled(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: false, CardAdvanceEnabled: true}, nil
+		},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
+	if err == nil || !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+	if got := err.Error(); !strings.Contains(got, "disabled for this store") {
+		t.Fatalf("expected store-level rejection message, got %q", got)
+	}
+}
+
+func TestCreate_WrapsPaymentMethodSettingsRepositoryError(t *testing.T) {
+	storeRepo := &fakeAppointmentStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, UserID: "owner-1", CashOnSiteEnabled: true, CardAdvanceEnabled: true}, nil
+		},
+	}
+	settingsRepo := &fakePaymentMethodSettingsRepository{err: errors.New("db unavailable")}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, nil, storeRepo, nil, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, settingsRepo, discardLogger())
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
+	if err == nil {
+		t.Fatal("expected an error, got nil")
 	}
 }
 
@@ -499,7 +586,7 @@ func TestCreate_RejectsServiceNotBelongingToStore(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "other-store", DurationMinutes: 30, IsActive: true}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -514,7 +601,7 @@ func TestCreate_RejectsInactiveService(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 30, IsActive: false}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -532,7 +619,7 @@ func TestCreate_EndTimeReflectsServiceDuration(t *testing.T) {
 	repo := &fakeAppointmentRepository{
 		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
 	}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	startTime := time.Now().Add(time.Hour)
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, startTime)
@@ -558,7 +645,7 @@ func TestCreate_CashOnSite_NeverCharges(t *testing.T) {
 		return nil
 	}}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(time.Hour))
 	if err != nil {
@@ -584,7 +671,7 @@ func TestCreate_CardAdvance_AutoConfirm_ChargeSucceeds(t *testing.T) {
 		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
 	}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if err != nil {
@@ -610,7 +697,7 @@ func TestCreate_CardAdvance_AutoConfirm_ChargeFails(t *testing.T) {
 		return errors.New("card declined")
 	}}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if err != nil {
@@ -633,7 +720,7 @@ func TestCreate_CardAdvance_AutoConfirm_TransactionWriteFailureDoesNotBlockCreat
 		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
 	}
 	transactionRepo := &fakePaymentTransactionRepository{createErr: errors.New("audit db unavailable")}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if err != nil {
@@ -655,7 +742,7 @@ func TestCreate_CardAdvance_ManualConfirm_DoesNotChargeYet(t *testing.T) {
 		return nil
 	}}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, processor, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	appointment, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCardAdvance, time.Now().Add(time.Hour))
 	if err != nil {
@@ -682,7 +769,7 @@ func TestCreate_RejectsWithinServiceMinLeadTime(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 10, IsActive: true, MinLeadTimeMinutes: 60}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(30*time.Minute))
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -700,7 +787,7 @@ func TestCreate_AllowsAfterServiceMinLeadTime(t *testing.T) {
 	repo := &fakeAppointmentRepository{
 		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
 	}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, time.Now().Add(90*time.Minute))
 	if err != nil {
@@ -715,7 +802,7 @@ func TestGetAvailableSlots_RejectsServiceNotBelongingToStore(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "other-store", DurationMinutes: 30, IsActive: true}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	dateStr := time.Now().Add(48 * time.Hour).Format("2006-01-02")
 	_, err := uc.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
@@ -731,7 +818,7 @@ func TestGetAvailableSlots_RejectsInactiveService(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 30, IsActive: false}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	dateStr := time.Now().Add(48 * time.Hour).Format("2006-01-02")
 	_, err := uc.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
@@ -752,7 +839,7 @@ func TestGetAvailableSlots_SpacingReflectsServiceDuration(t *testing.T) {
 			return nil, nil
 		},
 	}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	// The schedule fake is open 00:00-23:59, so a 60-minute service produces 23 one-hour slots
 	// (00:00 through 22:00 inclusive; a slot starting at 23:00 would end at 00:00 the next day,
@@ -796,8 +883,8 @@ func TestGetAvailableSlots_ExcludesSlotsWithinServiceMinLeadTime(t *testing.T) {
 
 	dateStr := time.Now().UTC().Format("2006-01-02")
 
-	ucWithLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, withLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
-	ucNoLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, noLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	ucWithLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, withLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
+	ucNoLeadTime := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, noLeadTime, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	slotsWithLeadTime, err := ucWithLeadTime.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
 	if err != nil {
@@ -850,7 +937,7 @@ func TestGetAvailableSlots_TwoSegmentsWithGap(t *testing.T) {
 			return nil, nil
 		},
 	}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	dateStr := time.Now().Add(48 * time.Hour).Format("2006-01-02")
 	slots, err := uc.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
@@ -880,7 +967,7 @@ func TestCreate_RejectsAppointmentInGapBetweenSegments(t *testing.T) {
 			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 30, IsActive: true}, nil
 		},
 	}
-	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	// 12:15 UTC falls in the gap between the 08:00-12:00 and 13:30-17:30 segments.
 	baseDate := time.Now().UTC().Add(72 * time.Hour)
@@ -903,7 +990,7 @@ func TestCreate_AllowsAppointmentInSecondSegment(t *testing.T) {
 	repo := &fakeAppointmentRepository{
 		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
 	}
-	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	baseDate := time.Now().UTC().Add(72 * time.Hour)
 	startTime := time.Date(baseDate.Year(), baseDate.Month(), baseDate.Day(), 14, 0, 0, 0, time.UTC)
@@ -941,7 +1028,7 @@ func TestUpdateStatus_ConfirmingCardAdvance_ChargesAndConfirms(t *testing.T) {
 		},
 	}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	updated, err := uc.UpdateStatus(context.Background(), appointmentID, ownerID, domain.AppointmentStatusConfirmed, "")
 	if err != nil {
@@ -992,7 +1079,7 @@ func TestUpdateStatus_ConfirmingCardAdvance_ChargeFailsKeepsItPending(t *testing
 		return errors.New("card declined")
 	}}
 	transactionRepo := &fakePaymentTransactionRepository{}
-	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, processor, transactionRepo, discardLogger())
+	uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, processor, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 	_, err := uc.UpdateStatus(context.Background(), appointmentID, ownerID, domain.AppointmentStatusConfirmed, "")
 	if !errors.Is(err, domain.ErrPaymentFailed) {
@@ -1061,7 +1148,7 @@ func TestConfirmCashPayment(t *testing.T) {
 				},
 			}
 			transactionRepo := &fakePaymentTransactionRepository{}
-			uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+			uc := NewAppointmentUseCase(repo, nil, storeRepo, serviceRepo, &fakePaymentProcessor{}, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 			updated, err := uc.ConfirmCashPayment(context.Background(), appointmentID, tt.requesterUserID)
 
@@ -1113,7 +1200,7 @@ func TestListPaymentTransactions_Authorization(t *testing.T) {
 				},
 			}
 			transactionRepo := &fakePaymentTransactionRepository{created: transactions}
-			uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, transactionRepo, discardLogger())
+			uc := NewAppointmentUseCase(repo, nil, storeRepo, nil, &fakePaymentProcessor{}, transactionRepo, enabledPaymentMethodSettingsRepo(), discardLogger())
 
 			got, err := uc.ListPaymentTransactions(context.Background(), appointmentID, tt.requesterUserID)
 

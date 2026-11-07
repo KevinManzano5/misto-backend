@@ -96,17 +96,19 @@ func main() {
 	storeCategoryRepo := postgres.NewStoreCategoryRepository(pool)
 	storeCategoryAssignmentRepo := postgres.NewStoreCategoryAssignmentRepository(pool)
 	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
+	paymentMethodSettingsRepo := postgres.NewPaymentMethodSettingsRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeRatingRepo)
 	paymentProcessor := payment.NewStubProcessor()
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeServiceScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, log)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeServiceScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, paymentMethodSettingsRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
 	storeCategoryUC := usecase.NewStoreCategoryUseCase(storeCategoryRepo)
 	storeCategoryAssignmentUC := usecase.NewStoreCategoryAssignmentUseCase(storeCategoryAssignmentRepo, storeRepo)
 	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo, storeRepo, storeCategoryAssignmentRepo, storeServiceScheduleRepo)
+	paymentMethodSettingsUC := usecase.NewPaymentMethodSettingsUseCase(paymentMethodSettingsRepo, log)
 
 	// Background jobs
 	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)
@@ -139,14 +141,15 @@ func main() {
 
 	// Grouping of handlers
 	handlers := &router.AppHandlers{
-		Health:        handler.NewHealthHandler(),
-		User:          handler.NewUserHandler(userUC, storeUC, validate, log),
-		Auth:          handler.NewAuthHandler(authUC, validate, log),
-		Store:         handler.NewStoreHandler(storeUC, storeCategoryAssignmentUC, validate, log),
-		Appointment:   handler.NewAppointmentHandler(appointmentUC, storeRatingUC, validate, log),
-		StoreRating:   handler.NewStoreRatingHandler(storeRatingUC, validate, log),
-		StoreCategory: handler.NewStoreCategoryHandler(storeCategoryUC, log),
-		StoreService:  handler.NewStoreServiceHandler(storeServiceUC, validate, log),
+		Health:                handler.NewHealthHandler(),
+		User:                  handler.NewUserHandler(userUC, storeUC, validate, log),
+		Auth:                  handler.NewAuthHandler(authUC, validate, log),
+		Store:                 handler.NewStoreHandler(storeUC, storeCategoryAssignmentUC, paymentMethodSettingsUC, validate, log),
+		Appointment:           handler.NewAppointmentHandler(appointmentUC, storeRatingUC, validate, log),
+		StoreRating:           handler.NewStoreRatingHandler(storeRatingUC, validate, log),
+		StoreCategory:         handler.NewStoreCategoryHandler(storeCategoryUC, log),
+		StoreService:          handler.NewStoreServiceHandler(storeServiceUC, validate, log),
+		PaymentMethodSettings: handler.NewPaymentMethodSettingsHandler(paymentMethodSettingsUC, validate, log),
 	}
 
 	// Initialization of specific middlewares

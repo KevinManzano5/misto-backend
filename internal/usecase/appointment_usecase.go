@@ -41,6 +41,12 @@ type AppointmentStoreRepository interface {
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 }
 
+// AppointmentPaymentMethodSettingsRepository interface (narrowed to what AppointmentUseCase
+// needs to enforce platform-wide payment method availability)
+type AppointmentPaymentMethodSettingsRepository interface {
+	GetPaymentMethodSettings(ctx context.Context) (*domain.PaymentMethodSettings, error)
+}
+
 // AppointmentStoreServiceRepository interface (narrowed to what AppointmentUseCase needs from a
 // store service)
 type AppointmentStoreServiceRepository interface {
@@ -56,25 +62,27 @@ type PaymentTransactionRepository interface {
 
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
-	repo                   AppointmentRepository
-	scheduleRepo           AppointmentStoreServiceScheduleRepository
-	storeRepo              AppointmentStoreRepository
-	storeServiceRepo       AppointmentStoreServiceRepository
-	paymentProcessor       PaymentProcessor
-	paymentTransactionRepo PaymentTransactionRepository
-	log                    *slog.Logger
+	repo                      AppointmentRepository
+	scheduleRepo              AppointmentStoreServiceScheduleRepository
+	storeRepo                 AppointmentStoreRepository
+	storeServiceRepo          AppointmentStoreServiceRepository
+	paymentProcessor          PaymentProcessor
+	paymentTransactionRepo    PaymentTransactionRepository
+	paymentMethodSettingsRepo AppointmentPaymentMethodSettingsRepository
+	log                       *slog.Logger
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentStoreServiceScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentStoreServiceScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, paymentMethodSettingsRepo AppointmentPaymentMethodSettingsRepository, log *slog.Logger) *AppointmentUseCase {
 	return &AppointmentUseCase{
-		repo:                   repo,
-		scheduleRepo:           scheduleRepo,
-		storeRepo:              storeRepo,
-		storeServiceRepo:       storeServiceRepo,
-		paymentProcessor:       paymentProcessor,
-		paymentTransactionRepo: paymentTransactionRepo,
-		log:                    log,
+		repo:                      repo,
+		scheduleRepo:              scheduleRepo,
+		storeRepo:                 storeRepo,
+		storeServiceRepo:          storeServiceRepo,
+		paymentProcessor:          paymentProcessor,
+		paymentTransactionRepo:    paymentTransactionRepo,
+		paymentMethodSettingsRepo: paymentMethodSettingsRepo,
+		log:                       log,
 	}
 }
 
@@ -133,6 +141,18 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 	store, err := usecase.storeRepo.GetStoreByID(ctx, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store: %w", err)
+	}
+
+	settings, err := usecase.paymentMethodSettingsRepo.GetPaymentMethodSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting payment method settings: %w", err)
+	}
+
+	if paymentMethod == domain.PaymentMethodCashOnSite && !settings.CashOnSiteEnabled {
+		return nil, fmt.Errorf("%w: cash_on_site payment method is disabled platform-wide", domain.ErrInvalidInput)
+	}
+	if paymentMethod == domain.PaymentMethodCardAdvance && !settings.CardAdvanceEnabled {
+		return nil, fmt.Errorf("%w: card_advance payment method is disabled platform-wide", domain.ErrInvalidInput)
 	}
 
 	if paymentMethod == domain.PaymentMethodCashOnSite && !store.CashOnSiteEnabled {

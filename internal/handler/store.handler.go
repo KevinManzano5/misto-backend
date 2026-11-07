@@ -20,19 +20,21 @@ import (
 
 // StoreHandler struct
 type StoreHandler struct {
-	usecase         *usecase.StoreUseCase
-	categoryUsecase *usecase.StoreCategoryAssignmentUseCase
-	validator       *validator.Validator
-	logger          *slog.Logger
+	usecase                      *usecase.StoreUseCase
+	categoryUsecase              *usecase.StoreCategoryAssignmentUseCase
+	paymentMethodSettingsUsecase *usecase.PaymentMethodSettingsUseCase
+	validator                    *validator.Validator
+	logger                       *slog.Logger
 }
 
 // NewStoreHandler constructor
-func NewStoreHandler(usecase *usecase.StoreUseCase, categoryUsecase *usecase.StoreCategoryAssignmentUseCase, validator *validator.Validator, logger *slog.Logger) *StoreHandler {
+func NewStoreHandler(usecase *usecase.StoreUseCase, categoryUsecase *usecase.StoreCategoryAssignmentUseCase, paymentMethodSettingsUsecase *usecase.PaymentMethodSettingsUseCase, validator *validator.Validator, logger *slog.Logger) *StoreHandler {
 	return &StoreHandler{
-		usecase:         usecase,
-		categoryUsecase: categoryUsecase,
-		validator:       validator,
-		logger:          logger,
+		usecase:                      usecase,
+		categoryUsecase:              categoryUsecase,
+		paymentMethodSettingsUsecase: paymentMethodSettingsUsecase,
+		validator:                    validator,
+		logger:                       logger,
 	}
 }
 
@@ -168,11 +170,18 @@ func isAdminCaller(request *http.Request) bool {
 // buildStoreResponse composes the full store response, embedding its assigned categories and
 // rating summary so callers don't need separate requests to see them. ratingSummary may be nil,
 // in which case the response's rating fields are left at their zero value. isAdmin controls
-// whether the admin-only AppUsageFeePercentage is included.
+// whether the admin-only AppUsageFeePercentage is included. Each payment method in the response
+// reflects both the store's own toggle AND the platform-wide one, so a method the admin has
+// disabled globally never shows as available even if this store enabled it.
 func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store, ratingSummary *domain.StoreRatingSummary, isAdmin bool) (storeResponse, error) {
 	categories, err := handler.categoryUsecase.ListStoreCategories(ctx, store.ID)
 	if err != nil {
 		return storeResponse{}, fmt.Errorf("listing store categories: %w", err)
+	}
+
+	paymentMethodSettings, err := handler.paymentMethodSettingsUsecase.Get(ctx)
+	if err != nil {
+		return storeResponse{}, fmt.Errorf("getting payment method settings: %w", err)
 	}
 
 	categoryResponses := make([]storeCategoryResponse, 0, len(categories))
@@ -202,8 +211,8 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              store.PhoneNumber,
 		PaymentMethods: paymentMethodsResponse{
-			CashOnSite:  store.CashOnSiteEnabled,
-			CardAdvance: store.CardAdvanceEnabled,
+			CashOnSite:  store.CashOnSiteEnabled && paymentMethodSettings.CashOnSiteEnabled,
+			CardAdvance: store.CardAdvanceEnabled && paymentMethodSettings.CardAdvanceEnabled,
 		},
 		Categories:    categoryResponses,
 		AverageRating: averageRating,
