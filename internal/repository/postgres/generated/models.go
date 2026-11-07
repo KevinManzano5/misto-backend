@@ -79,17 +79,6 @@ type StoreRating struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
-type StoreSchedule struct {
-	ID        pgtype.UUID        `json:"id"`
-	StoreID   pgtype.UUID        `json:"store_id"`
-	DayOfWeek int32              `json:"day_of_week"`
-	OpenTime  pgtype.Time        `json:"open_time"`
-	CloseTime pgtype.Time        `json:"close_time"`
-	IsClosed  bool               `json:"is_closed"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
 type StoreService struct {
 	ID                 pgtype.UUID        `json:"id"`
 	StoreID            pgtype.UUID        `json:"store_id"`
@@ -102,6 +91,24 @@ type StoreService struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	MinLeadTimeMinutes int32              `json:"min_lead_time_minutes"`
+}
+
+type StoreServiceSchedule struct {
+	ID             pgtype.UUID        `json:"id"`
+	StoreServiceID pgtype.UUID        `json:"store_service_id"`
+	DayOfWeek      int32              `json:"day_of_week"`
+	IsClosed       bool               `json:"is_closed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StoreServiceScheduleSegment struct {
+	ID                     pgtype.UUID        `json:"id"`
+	StoreServiceScheduleID pgtype.UUID        `json:"store_service_schedule_id"`
+	OpenTime               pgtype.Time        `json:"open_time"`
+	CloseTime              pgtype.Time        `json:"close_time"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

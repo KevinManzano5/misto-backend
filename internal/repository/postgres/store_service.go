@@ -121,6 +121,100 @@ func (repo *StoreServiceRepository) CreateStoreService(ctx context.Context, serv
 	return nil
 }
 
+// CreateStoreServiceWithSchedules creates a store service and its default weekly schedule
+// atomically, so a failure inserting any schedule row rolls back the service creation instead of
+// leaving a service without a configured schedule.
+func (repo *StoreServiceRepository) CreateStoreServiceWithSchedules(ctx context.Context, service *domain.StoreService, schedules []*domain.StoreServiceSchedule) error {
+	var storeID, categoryID pgtype.UUID
+
+	if err := storeID.Scan(service.StoreID); err != nil {
+		return fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+	if err := categoryID.Scan(service.CategoryID); err != nil {
+		return fmt.Errorf("invalid categoryID: %w", domain.ErrInvalidInput)
+	}
+
+	price, err := toPgNumericPrice(service.Price)
+	if err != nil {
+		return err
+	}
+
+	var description *string
+	if service.Description != "" {
+		description = &service.Description
+	}
+
+	tx, err := repo.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning store service creation transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	txQueries := repo.queries.WithTx(tx)
+
+	result, err := txQueries.CreateStoreService(ctx, postgres.CreateStoreServiceParams{
+		StoreID:            storeID,
+		CategoryID:         categoryID,
+		Name:               service.Name,
+		Description:        description,
+		DurationMinutes:    service.DurationMinutes,
+		Price:              price,
+		MinLeadTimeMinutes: service.MinLeadTimeMinutes,
+	})
+	if err != nil {
+		return translateStoreServiceWriteError(err)
+	}
+
+	created, err := toDomainStoreService(result)
+	if err != nil {
+		return err
+	}
+	*service = *created
+
+	var serviceID pgtype.UUID
+	if err := serviceID.Scan(service.ID); err != nil {
+		return fmt.Errorf("invalid serviceID: %w", domain.ErrInvalidInput)
+	}
+
+	for _, schedule := range schedules {
+		dayResult, err := txQueries.UpsertStoreServiceScheduleDay(ctx, postgres.UpsertStoreServiceScheduleDayParams{
+			StoreServiceID: serviceID,
+			DayOfWeek:      schedule.DayOfWeek,
+			IsClosed:       schedule.IsClosed,
+		})
+		if err != nil {
+			return fmt.Errorf("creating default schedule for day %d: %w", schedule.DayOfWeek, err)
+		}
+
+		schedule.ID = dayResult.ID.String()
+		schedule.StoreServiceID = service.ID
+		schedule.CreatedAt = dayResult.CreatedAt.Time.UTC()
+		schedule.UpdatedAt = dayResult.UpdatedAt.Time.UTC()
+
+		segments := make([]domain.StoreServiceScheduleSegment, 0, len(schedule.Segments))
+		for _, segment := range schedule.Segments {
+			segmentResult, err := txQueries.CreateStoreServiceScheduleSegment(ctx, postgres.CreateStoreServiceScheduleSegmentParams{
+				StoreServiceScheduleID: dayResult.ID,
+				OpenTime:               toPgTime(segment.OpenTime),
+				CloseTime:              toPgTime(segment.CloseTime),
+			})
+			if err != nil {
+				return translateServiceScheduleSegmentWriteError(err)
+			}
+			segments = append(segments, toDomainServiceSegment(segmentResult))
+		}
+		schedule.Segments = segments
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing store service creation: %w", err)
+	}
+
+	return nil
+}
+
 // GetStoreServiceByID method
 func (repo *StoreServiceRepository) GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error) {
 	var serviceID pgtype.UUID

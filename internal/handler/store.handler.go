@@ -83,7 +83,6 @@ type storeResponse struct {
 	Address                  string                  `json:"address"`
 	AllowSameDayAppointments bool                    `json:"allow_same_day_appointments"`
 	PhoneNumber              string                  `json:"phone_number"`
-	Schedules                []storeScheduleResponse `json:"schedules"`
 	Categories               []storeCategoryResponse `json:"categories"`
 	AverageRating            float64                 `json:"average_rating"`
 	RatingCount              int64                   `json:"rating_count"`
@@ -94,36 +93,6 @@ type storeResponse struct {
 // replaceStoreCategoriesRequest struct
 type replaceStoreCategoriesRequest struct {
 	CategoryIDs []string `json:"category_ids" validate:"required,max=5,dive,uuid"`
-}
-
-type upsertStoreScheduleRequest struct {
-	OpenTime  string `json:"open_time" validate:"omitempty"`
-	CloseTime string `json:"close_time" validate:"omitempty"`
-	IsClosed  bool   `json:"is_closed"`
-}
-
-type storeScheduleResponse struct {
-	ID        string    `json:"id"`
-	StoreID   string    `json:"store_id"`
-	DayOfWeek int32     `json:"day_of_week"`
-	OpenTime  string    `json:"open_time"`
-	CloseTime string    `json:"close_time"`
-	IsClosed  bool      `json:"is_closed"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func toStoreScheduleResponse(schedule *domain.StoreSchedule) storeScheduleResponse {
-	return storeScheduleResponse{
-		ID:        schedule.ID,
-		StoreID:   schedule.StoreID,
-		DayOfWeek: schedule.DayOfWeek,
-		OpenTime:  schedule.OpenTime,
-		CloseTime: schedule.CloseTime,
-		IsClosed:  schedule.IsClosed,
-		CreatedAt: schedule.CreatedAt,
-		UpdatedAt: schedule.UpdatedAt,
-	}
 }
 
 // uuidPattern matches a canonical (8-4-4-4-12 hex) UUID, case-insensitively.
@@ -155,20 +124,10 @@ func toStoreCategoryResponse(category *domain.StoreCategory) storeCategoryRespon
 	}
 }
 
-// buildStoreResponse composes the full store response, embedding its weekly schedules, assigned
-// categories, and rating summary so callers don't need separate requests to see them. ratingSummary
-// may be nil, in which case the response's rating fields are left at their zero value.
+// buildStoreResponse composes the full store response, embedding its assigned categories and
+// rating summary so callers don't need separate requests to see them. ratingSummary may be nil,
+// in which case the response's rating fields are left at their zero value.
 func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *domain.Store, ratingSummary *domain.StoreRatingSummary) (storeResponse, error) {
-	schedules, err := handler.usecase.ListSchedules(ctx, store.ID)
-	if err != nil {
-		return storeResponse{}, fmt.Errorf("listing store schedules: %w", err)
-	}
-
-	scheduleResponses := make([]storeScheduleResponse, 0, len(schedules))
-	for _, schedule := range schedules {
-		scheduleResponses = append(scheduleResponses, toStoreScheduleResponse(schedule))
-	}
-
 	categories, err := handler.categoryUsecase.ListStoreCategories(ctx, store.ID)
 	if err != nil {
 		return storeResponse{}, fmt.Errorf("listing store categories: %w", err)
@@ -200,7 +159,6 @@ func (handler *StoreHandler) buildStoreResponse(ctx context.Context, store *doma
 		Address:                  store.Address,
 		AllowSameDayAppointments: store.AllowSameDayAppointments,
 		PhoneNumber:              store.PhoneNumber,
-		Schedules:                scheduleResponses,
 		Categories:               categoryResponses,
 		AverageRating:            averageRating,
 		RatingCount:              ratingCount,
@@ -494,71 +452,6 @@ func (handler *StoreHandler) ListStores(writer http.ResponseWriter, request *htt
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",
-			"error", err,
-			"method", request.Method,
-			"path", request.URL.Path,
-		)
-	}
-}
-
-// UpsertSchedule endpoint (e.g., PUT /stores/{storeId}/schedules/{day})
-func (handler *StoreHandler) UpsertSchedule(writer http.ResponseWriter, request *http.Request) {
-	storeID := request.PathValue("storeId")
-
-	dayOfWeek, err := parseDayOfWeek(request.PathValue("day"))
-	if err != nil {
-		RespondError(writer, request, handler.logger, err)
-		return
-	}
-
-	if request.Body == nil {
-		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
-		return
-	}
-	defer func() {
-		if err := request.Body.Close(); err != nil {
-			handler.logger.ErrorContext(
-				request.Context(),
-				"failed to close request body",
-				"error", err,
-				"method", request.Method,
-				"path", request.URL.Path,
-			)
-		}
-	}()
-
-	var req upsertStoreScheduleRequest
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&req); err != nil {
-		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
-		return
-	}
-
-	if errs := handler.validator.Validate(req); errs != nil {
-		if err := RespondValidationError(writer, errs); err != nil {
-			handler.logger.ErrorContext(
-				request.Context(),
-				"error trying to create validation response",
-				"error", err,
-				"method", request.Method,
-				"path", request.URL.Path,
-			)
-		}
-		return
-	}
-
-	schedule, err := handler.usecase.UpsertSchedule(request.Context(), storeID, dayOfWeek, req.OpenTime, req.CloseTime, req.IsClosed)
-	if err != nil {
-		RespondError(writer, request, handler.logger, err)
-		return
-	}
-
-	if err := RespondJSON(writer, http.StatusOK, toStoreScheduleResponse(schedule)); err != nil {
-		handler.logger.ErrorContext(
-			request.Context(),
-			"error trying to create response JSON",
 			"error", err,
 			"method", request.Method,
 			"path", request.URL.Path,

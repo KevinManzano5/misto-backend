@@ -53,9 +53,7 @@ func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handle
 	srv.RegisterRoutes("GET /api/v1/users/{id}", http.HandlerFunc(user.Get))
 }
 
-// setupStoreRoutes registers endpoints for managing stores and their schedules (mixed).
-// A store's weekly schedules are embedded directly in its GET response (storeResponse.Schedules),
-// so there is no separate read endpoint for them; only the mutation route remains.
+// setupStoreRoutes registers endpoints for managing stores (mixed).
 func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW middlewares.Middleware) {
 	// Helper for wrapping protected handlers
 	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
@@ -71,10 +69,6 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW mi
 	srv.RegisterRoutes("POST /api/v1/stores", withAuth(store.Create))
 	srv.RegisterRoutes("PATCH /api/v1/stores/{id}", withAuth(store.UpdateStore))
 	srv.RegisterRoutes("DELETE /api/v1/stores/{id}", withAuth(store.DeleteStore))
-
-	// === Store schedules routes ===
-	// Private
-	srv.RegisterRoutes("PUT /api/v1/stores/{storeId}/schedules/{day}", withAuth(store.UpsertSchedule))
 
 	// === Store categories routes ===
 	// Private. A store's assigned categories are embedded directly in its GET response
@@ -145,4 +139,5 @@ func setupStoreServiceRoutes(srv *server.Server, service *handler.StoreServiceHa
 	srv.RegisterRoutes("POST /api/v1/stores/{storeId}/services", withAuth(service.Create))
 	srv.RegisterRoutes("PATCH /api/v1/services/{id}", withAuth(service.Update))
 	srv.RegisterRoutes("DELETE /api/v1/services/{id}", withAuth(service.Delete))
+	srv.RegisterRoutes("PUT /api/v1/services/{serviceId}/schedules/{day}", withAuth(service.UpsertSchedule))
 }

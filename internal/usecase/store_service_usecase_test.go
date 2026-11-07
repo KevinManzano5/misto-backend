@@ -10,16 +10,20 @@ import (
 
 // fakeStoreServiceRepository is a minimal StoreServiceRepository test double.
 type fakeStoreServiceRepository struct {
-	createStoreServiceFunc          func(ctx context.Context, service *domain.StoreService) error
-	getStoreServiceByIDFunc         func(ctx context.Context, id string) (*domain.StoreService, error)
-	listStoreServicesByStoreFunc    func(ctx context.Context, storeID string) ([]*domain.StoreService, error)
-	listAllStoreServicesByStoreFunc func(ctx context.Context, storeID string) ([]*domain.StoreService, error)
-	updateStoreServiceFunc          func(ctx context.Context, service *domain.StoreService) (*domain.StoreService, error)
-	deleteStoreServiceFunc          func(ctx context.Context, id string) error
+	createStoreServiceWithSchedulesFunc func(ctx context.Context, service *domain.StoreService, schedules []*domain.StoreServiceSchedule) error
+	getStoreServiceByIDFunc             func(ctx context.Context, id string) (*domain.StoreService, error)
+	listStoreServicesByStoreFunc        func(ctx context.Context, storeID string) ([]*domain.StoreService, error)
+	listAllStoreServicesByStoreFunc     func(ctx context.Context, storeID string) ([]*domain.StoreService, error)
+	updateStoreServiceFunc              func(ctx context.Context, service *domain.StoreService) (*domain.StoreService, error)
+	deleteStoreServiceFunc              func(ctx context.Context, id string) error
 }
 
 func (f *fakeStoreServiceRepository) CreateStoreService(ctx context.Context, service *domain.StoreService) error {
-	return f.createStoreServiceFunc(ctx, service)
+	panic("not implemented")
+}
+
+func (f *fakeStoreServiceRepository) CreateStoreServiceWithSchedules(ctx context.Context, service *domain.StoreService, schedules []*domain.StoreServiceSchedule) error {
+	return f.createStoreServiceWithSchedulesFunc(ctx, service, schedules)
 }
 
 func (f *fakeStoreServiceRepository) GetStoreServiceByID(ctx context.Context, id string) (*domain.StoreService, error) {
@@ -60,6 +64,20 @@ func (f *fakeStoreServiceCategoryRepository) ListCategoriesForStore(ctx context.
 	return f.listCategoriesForStoreFunc(ctx, storeID)
 }
 
+// fakeStoreServiceScheduleRepository is a minimal StoreServiceScheduleRepository test double.
+type fakeStoreServiceScheduleRepositoryForService struct {
+	upsertFunc func(ctx context.Context, schedule *domain.StoreServiceSchedule) error
+	listFunc   func(ctx context.Context, storeServiceID string) ([]*domain.StoreServiceSchedule, error)
+}
+
+func (f *fakeStoreServiceScheduleRepositoryForService) UpsertStoreServiceSchedule(ctx context.Context, schedule *domain.StoreServiceSchedule) error {
+	return f.upsertFunc(ctx, schedule)
+}
+
+func (f *fakeStoreServiceScheduleRepositoryForService) ListStoreServiceSchedules(ctx context.Context, storeServiceID string) ([]*domain.StoreServiceSchedule, error) {
+	return f.listFunc(ctx, storeServiceID)
+}
+
 // ownedStoreRepo returns a store repository fake where "owner-1" owns every store.
 func ownedStoreRepo() *fakeStoreServiceStoreRepository {
 	return &fakeStoreServiceStoreRepository{
@@ -79,7 +97,7 @@ func assignedCategoryRepo() *fakeStoreServiceCategoryRepository {
 }
 
 func TestCreate_RejectsNonOwner(t *testing.T) {
-	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	_, err := uc.Create(context.Background(), "store-1", "someone-else", "cat-1", "Haircut", "", 30, 10, 0)
 	if !errors.Is(err, domain.ErrForbidden) {
@@ -88,7 +106,7 @@ func TestCreate_RejectsNonOwner(t *testing.T) {
 }
 
 func TestCreate_RejectsCategoryNotAssignedToStore(t *testing.T) {
-	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	_, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-unassigned", "Haircut", "", 30, 10, 0)
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -98,16 +116,18 @@ func TestCreate_RejectsCategoryNotAssignedToStore(t *testing.T) {
 
 func TestCreate_Succeeds(t *testing.T) {
 	var created *domain.StoreService
+	var createdSchedules []*domain.StoreServiceSchedule
 
 	repo := &fakeStoreServiceRepository{
-		createStoreServiceFunc: func(ctx context.Context, service *domain.StoreService) error {
+		createStoreServiceWithSchedulesFunc: func(ctx context.Context, service *domain.StoreService, schedules []*domain.StoreServiceSchedule) error {
 			service.ID = "service-1"
 			created = service
+			createdSchedules = schedules
 			return nil
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	service, err := uc.Create(context.Background(), "store-1", "owner-1", "cat-1", "Haircut", "A classic haircut", 30, 10, 0)
 	if err != nil {
@@ -119,6 +139,9 @@ func TestCreate_Succeeds(t *testing.T) {
 	if created == nil || created.StoreID != "store-1" || created.CategoryID != "cat-1" {
 		t.Fatalf("expected service persisted for store-1/cat-1, got %+v", created)
 	}
+	if len(createdSchedules) != 7 {
+		t.Fatalf("expected a default schedule seeded for all 7 days, got %d", len(createdSchedules))
+	}
 }
 
 func TestUpdate_RejectsNonOwner(t *testing.T) {
@@ -128,7 +151,7 @@ func TestUpdate_RejectsNonOwner(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	_, err := uc.Update(context.Background(), "service-1", "someone-else", nil, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, domain.ErrForbidden) {
@@ -143,7 +166,7 @@ func TestUpdate_RejectsCategoryNotAssignedToStore(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	unassigned := "cat-unassigned"
 	_, err := uc.Update(context.Background(), "service-1", "owner-1", &unassigned, nil, nil, nil, nil, nil, nil)
@@ -162,7 +185,7 @@ func TestUpdate_Succeeds(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	newName := "Fade Haircut"
 	updated, err := uc.Update(context.Background(), "service-1", "owner-1", nil, &newName, nil, nil, nil, nil, nil)
@@ -181,7 +204,7 @@ func TestDelete_RejectsNonOwner(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	err := uc.Delete(context.Background(), "service-1", "someone-else")
 	if !errors.Is(err, domain.ErrForbidden) {
@@ -202,7 +225,7 @@ func TestDelete_Succeeds(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	if err := uc.Delete(context.Background(), "service-1", "owner-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -225,7 +248,7 @@ func TestListByStore_ReturnsActiveOnly(t *testing.T) {
 		},
 	}
 
-	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo())
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
 
 	services, err := uc.ListByStore(context.Background(), "store-1")
 	if err != nil {
@@ -236,5 +259,75 @@ func TestListByStore_ReturnsActiveOnly(t *testing.T) {
 	}
 	if calledAll {
 		t.Fatalf("expected ListByStore to call the active-only repo method, not the all-services one")
+	}
+}
+
+func TestUpsertSchedule_RejectsNonOwner(t *testing.T) {
+	repo := &fakeStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1"}, nil
+		},
+	}
+
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
+
+	segments := []domain.StoreServiceScheduleSegment{{OpenTime: "08:00", CloseTime: "12:00"}}
+	_, err := uc.UpsertSchedule(context.Background(), "service-1", "someone-else", 1, segments, false)
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestUpsertSchedule_RejectsOverlappingSegments(t *testing.T) {
+	repo := &fakeStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1"}, nil
+		},
+	}
+
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
+
+	segments := []domain.StoreServiceScheduleSegment{
+		{OpenTime: "08:00", CloseTime: "12:00"},
+		{OpenTime: "11:00", CloseTime: "17:30"},
+	}
+
+	_, err := uc.UpsertSchedule(context.Background(), "service-1", "owner-1", 1, segments, false)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestUpsertSchedule_AcceptsTwoSegmentsWithGap(t *testing.T) {
+	repo := &fakeStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1"}, nil
+		},
+	}
+
+	var saved *domain.StoreServiceSchedule
+	scheduleRepo := &fakeStoreServiceScheduleRepositoryForService{
+		upsertFunc: func(ctx context.Context, schedule *domain.StoreServiceSchedule) error {
+			saved = schedule
+			return nil
+		},
+	}
+
+	uc := NewStoreServiceUseCase(repo, ownedStoreRepo(), assignedCategoryRepo(), scheduleRepo)
+
+	segments := []domain.StoreServiceScheduleSegment{
+		{OpenTime: "08:00", CloseTime: "12:00"},
+		{OpenTime: "13:30", CloseTime: "17:30"},
+	}
+
+	schedule, err := uc.UpsertSchedule(context.Background(), "service-1", "owner-1", 1, segments, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(schedule.Segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(schedule.Segments))
+	}
+	if saved == nil {
+		t.Fatalf("expected UpsertStoreServiceSchedule to be called")
 	}
 }
