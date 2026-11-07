@@ -137,7 +137,7 @@ func RequireRole(role string, logger *slog.Logger) Middleware {
 			}
 
 			if claims.Role != role {
-				respondAuthError(w, r, logger, http.StatusUnauthorized, "Forbidden", "Forbidden")
+				respondAuthError(w, r, logger, http.StatusForbidden, "Forbidden", "Forbidden")
 
 				return
 			}

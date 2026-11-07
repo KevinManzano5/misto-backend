@@ -49,6 +49,7 @@ func (repository *UserRepository) Create(ctx context.Context, user *domain.User)
 	}
 
 	user.ID = result.ID.String()
+	user.Role = result.Role
 	user.CreatedAt = result.CreatedAt.Time.UTC()
 	user.UpdatedAt = result.UpdatedAt.Time.UTC()
 
@@ -91,6 +92,37 @@ func (repository *UserRepository) GetByEmail(ctx context.Context, email string) 
 	return toDomainUser(result), nil
 }
 
+// List method returns a page of users ordered by most recently created.
+func (repository *UserRepository) List(ctx context.Context, limit, offset int32) ([]*domain.User, error) {
+	results, err := repository.queries.ListUsers(ctx, postgres.ListUsersParams{
+		Limit:  limit,
+		Offset: offset,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+
+	users := make([]*domain.User, 0, len(results))
+
+	for _, result := range results {
+		users = append(users, toDomainUser(result))
+	}
+
+	return users, nil
+}
+
+// Count method returns the total number of users.
+func (repository *UserRepository) Count(ctx context.Context) (int64, error) {
+	total, err := repository.queries.CountUsers(ctx)
+
+	if err != nil {
+		return 0, fmt.Errorf("counting users: %w", err)
+	}
+
+	return total, nil
+}
+
 // toDomainUser
 func toDomainUser(user postgres.User) *domain.User {
 	return &domain.User{
@@ -101,6 +133,7 @@ func toDomainUser(user postgres.User) *domain.User {
 		FirstName:    user.FirstName,
 		LastName:     user.LastName,
 		IsActive:     user.IsActive,
+		Role:         user.Role,
 		CreatedAt:    user.CreatedAt.Time.UTC(),
 		UpdatedAt:    user.UpdatedAt.Time.UTC(),
 	}
