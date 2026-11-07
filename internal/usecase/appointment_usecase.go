@@ -30,9 +30,10 @@ type PaymentProcessor interface {
 	Charge(ctx context.Context, appointment *domain.Appointment) error
 }
 
-// StoreScheduleRepository interface (Added for checking availability)
-type StoreScheduleRepository interface {
-	GetStoreScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error)
+// AppointmentStoreServiceScheduleRepository interface (narrowed to what AppointmentUseCase needs
+// to check availability)
+type AppointmentStoreServiceScheduleRepository interface {
+	GetStoreServiceScheduleByDay(ctx context.Context, storeServiceID string, dayOfWeek int32) (*domain.StoreServiceSchedule, error)
 }
 
 // AppointmentStoreRepository interface (narrowed to what AppointmentUseCase needs from a store)
@@ -56,7 +57,7 @@ type PaymentTransactionRepository interface {
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
 	repo                   AppointmentRepository
-	scheduleRepo           StoreScheduleRepository
+	scheduleRepo           AppointmentStoreServiceScheduleRepository
 	storeRepo              AppointmentStoreRepository
 	storeServiceRepo       AppointmentStoreServiceRepository
 	paymentProcessor       PaymentProcessor
@@ -65,7 +66,7 @@ type AppointmentUseCase struct {
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo StoreScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentStoreServiceScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, log *slog.Logger) *AppointmentUseCase {
 	return &AppointmentUseCase{
 		repo:                   repo,
 		scheduleRepo:           scheduleRepo,
@@ -150,7 +151,7 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 
 	endTime := startTime.Add(time.Duration(service.DurationMinutes) * time.Minute)
 
-	if err := usecase.validateWithinStoreSchedule(ctx, store, startTime, endTime); err != nil {
+	if err := usecase.validateWithinServiceSchedule(ctx, store, service, startTime, endTime); err != nil {
 		return nil, err
 	}
 
@@ -239,41 +240,43 @@ func (usecase *AppointmentUseCase) ConfirmCashPayment(ctx context.Context, appoi
 	return updated, nil
 }
 
-// validateWithinStoreSchedule ensures the requested [startTime, endTime) range falls entirely
-// within the store's configured opening hours for that day of the week, with the day of week and
-// opening hours resolved in the store's own timezone rather than whatever offset the client's
-// startTime happened to carry.
-func (usecase *AppointmentUseCase) validateWithinStoreSchedule(ctx context.Context, store *domain.Store, startTime, endTime time.Time) error {
+// validateWithinServiceSchedule ensures the requested [startTime, endTime) range falls entirely
+// within one of the service's configured opening-hour segments for that day of the week, with
+// the day of week and opening hours resolved in the store's own timezone rather than whatever
+// offset the client's startTime happened to carry.
+func (usecase *AppointmentUseCase) validateWithinServiceSchedule(ctx context.Context, store *domain.Store, service *domain.StoreService, startTime, endTime time.Time) error {
 	localStart := startTime.In(storeLocation(store))
 	dayOfWeek := int32(localStart.Weekday())
 
-	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, store.ID, dayOfWeek)
+	schedule, err := usecase.scheduleRepo.GetStoreServiceScheduleByDay(ctx, service.ID, dayOfWeek)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return fmt.Errorf("%w: store has no schedule configured for this day", domain.ErrInvalidInput)
+			return fmt.Errorf("%w: service has no schedule configured for this day", domain.ErrInvalidInput)
 		}
-		return fmt.Errorf("getting store schedule: %w", err)
+		return fmt.Errorf("getting store service schedule: %w", err)
 	}
 
-	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
-		return fmt.Errorf("%w: store is closed on this day", domain.ErrInvalidInput)
+	if schedule.IsClosed || len(schedule.Segments) == 0 {
+		return fmt.Errorf("%w: service is closed on this day", domain.ErrInvalidInput)
 	}
 
-	openTime, err := parseScheduleClockTime(localStart, schedule.OpenTime)
-	if err != nil {
-		return fmt.Errorf("parsing store open time: %w", err)
+	for _, segment := range schedule.Segments {
+		openTime, err := parseScheduleClockTime(localStart, segment.OpenTime)
+		if err != nil {
+			return fmt.Errorf("parsing store open time: %w", err)
+		}
+
+		closeTime, err := parseScheduleClockTime(localStart, segment.CloseTime)
+		if err != nil {
+			return fmt.Errorf("parsing store close time: %w", err)
+		}
+
+		if !startTime.Before(openTime) && !endTime.After(closeTime) {
+			return nil
+		}
 	}
 
-	closeTime, err := parseScheduleClockTime(localStart, schedule.CloseTime)
-	if err != nil {
-		return fmt.Errorf("parsing store close time: %w", err)
-	}
-
-	if startTime.Before(openTime) || endTime.After(closeTime) {
-		return fmt.Errorf("%w: appointment falls outside store opening hours", domain.ErrInvalidInput)
-	}
-
-	return nil
+	return fmt.Errorf("%w: appointment falls outside store opening hours", domain.ErrInvalidInput)
 }
 
 // isSameLocalDay reports whether a and b fall on the same calendar day in loc.
@@ -315,10 +318,15 @@ type daySchedule struct {
 	targetDate         time.Time
 	durationMinutes    int32
 	minLeadTimeMinutes int32
-	openTime           time.Time
-	closeTime          time.Time
+	segments           []scheduleSegment
 	isOpen             bool
 	appointments       []*domain.Appointment
+}
+
+// scheduleSegment is a parsed, concrete open/close pair for a single calendar date, in the
+// store's timezone.
+type scheduleSegment struct {
+	open, close time.Time
 }
 
 // resolveDaySchedule parses dateStr as a calendar date in the store's own timezone (not UTC),
@@ -356,27 +364,32 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 	}
 
 	dayOfWeek := int32(targetDate.Weekday())
-	schedule, err := usecase.scheduleRepo.GetStoreScheduleByDay(ctx, storeID, dayOfWeek)
+	schedule, err := usecase.scheduleRepo.GetStoreServiceScheduleByDay(ctx, service.ID, dayOfWeek)
 	if err != nil {
 		// If there is no schedule in the DB for that day, we assume it is closed.
 		if errors.Is(err, domain.ErrNotFound) {
 			return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes, minLeadTimeMinutes: service.MinLeadTimeMinutes}, nil
 		}
-		return nil, fmt.Errorf("getting store schedule: %w", err)
+		return nil, fmt.Errorf("getting store service schedule: %w", err)
 	}
 
-	if schedule.IsClosed || schedule.OpenTime == "" || schedule.CloseTime == "" {
+	if schedule.IsClosed || len(schedule.Segments) == 0 {
 		return &daySchedule{location: loc, targetDate: targetDate, durationMinutes: service.DurationMinutes, minLeadTimeMinutes: service.MinLeadTimeMinutes}, nil
 	}
 
-	openTime, err := parseScheduleClockTime(targetDate, schedule.OpenTime)
-	if err != nil {
-		return nil, fmt.Errorf("parsing store open time: %w", err)
-	}
+	segments := make([]scheduleSegment, 0, len(schedule.Segments))
+	for _, segment := range schedule.Segments {
+		openTime, err := parseScheduleClockTime(targetDate, segment.OpenTime)
+		if err != nil {
+			return nil, fmt.Errorf("parsing store open time: %w", err)
+		}
 
-	closeTime, err := parseScheduleClockTime(targetDate, schedule.CloseTime)
-	if err != nil {
-		return nil, fmt.Errorf("parsing store close time: %w", err)
+		closeTime, err := parseScheduleClockTime(targetDate, segment.CloseTime)
+		if err != nil {
+			return nil, fmt.Errorf("parsing store close time: %w", err)
+		}
+
+		segments = append(segments, scheduleSegment{open: openTime, close: closeTime})
 	}
 
 	startOfDay := targetDate
@@ -392,8 +405,7 @@ func (usecase *AppointmentUseCase) resolveDaySchedule(ctx context.Context, store
 		targetDate:         targetDate,
 		durationMinutes:    service.DurationMinutes,
 		minLeadTimeMinutes: service.MinLeadTimeMinutes,
-		openTime:           openTime,
-		closeTime:          closeTime,
+		segments:           segments,
 		isOpen:             true,
 		appointments:       appointments,
 	}, nil
@@ -409,35 +421,35 @@ func (day *daySchedule) availableSlots() []string {
 	}
 
 	slotDuration := time.Duration(day.durationMinutes) * time.Minute
-	currentSlot := day.openTime
+	minLeadTime := time.Duration(day.minLeadTimeMinutes) * time.Minute
 	now := time.Now().In(day.location)
+	isToday := day.targetDate.YearDay() == now.YearDay() && day.targetDate.Year() == now.Year()
 
-	for currentSlot.Add(slotDuration).Compare(day.closeTime) <= 0 {
-		slotEnd := currentSlot.Add(slotDuration)
-		isAvailable := true
+	for _, segment := range day.segments {
+		for currentSlot := segment.open; currentSlot.Add(slotDuration).Compare(segment.close) <= 0; currentSlot = currentSlot.Add(slotDuration) {
+			slotEnd := currentSlot.Add(slotDuration)
+			isAvailable := true
 
-		// If the selected schedule is for today (in the store's timezone), omit hours already
-		// passed or within the service's minimum lead time.
-		minLeadTime := time.Duration(day.minLeadTimeMinutes) * time.Minute
-		if day.targetDate.YearDay() == now.YearDay() && day.targetDate.Year() == now.Year() && currentSlot.Before(now.Add(minLeadTime)) {
-			isAvailable = false
-		}
+			// If the selected schedule is for today (in the store's timezone), omit hours already
+			// passed or within the service's minimum lead time.
+			if isToday && currentSlot.Before(now.Add(minLeadTime)) {
+				isAvailable = false
+			}
 
-		if isAvailable {
-			for _, appointment := range day.appointments {
-				// A conflict occurs if the time slot begins before the appointment ends, and ends after the appointment begins.
-				if currentSlot.Before(appointment.EndTime) && slotEnd.After(appointment.StartTime) {
-					isAvailable = false
-					break
+			if isAvailable {
+				for _, appointment := range day.appointments {
+					// A conflict occurs if the time slot begins before the appointment ends, and ends after the appointment begins.
+					if currentSlot.Before(appointment.EndTime) && slotEnd.After(appointment.StartTime) {
+						isAvailable = false
+						break
+					}
 				}
 			}
-		}
 
-		if isAvailable {
-			availableSlots = append(availableSlots, currentSlot.Format("15:04"))
+			if isAvailable {
+				availableSlots = append(availableSlots, currentSlot.Format("15:04"))
+			}
 		}
-
-		currentSlot = currentSlot.Add(slotDuration)
 	}
 
 	return availableSlots

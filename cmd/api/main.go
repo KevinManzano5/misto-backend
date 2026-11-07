@@ -89,7 +89,7 @@ func main() {
 	userRepo := postgres.NewUserRepository(pool)
 	storeRepo := postgres.NewStoreRepository(pool)
 	appointmentRepo := postgres.NewAppointmentRepository(pool)
-	storeScheduleRepo := postgres.NewStoreScheduleRepository(pool)
+	storeServiceScheduleRepo := postgres.NewStoreServiceScheduleRepository(pool)
 	storeRatingRepo := postgres.NewStoreRatingRepository(pool)
 	paymentTransactionRepo := postgres.NewPaymentTransactionRepository(pool)
 	storeCategoryRepo := postgres.NewStoreCategoryRepository(pool)
@@ -99,13 +99,13 @@ func main() {
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
-	storeUC := usecase.NewStoreUseCase(storeRepo, storeScheduleRepo, storeRatingRepo)
+	storeUC := usecase.NewStoreUseCase(storeRepo, storeRatingRepo)
 	paymentProcessor := payment.NewStubProcessor()
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, log)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeServiceScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
 	storeCategoryUC := usecase.NewStoreCategoryUseCase(storeCategoryRepo)
 	storeCategoryAssignmentUC := usecase.NewStoreCategoryAssignmentUseCase(storeCategoryAssignmentRepo, storeRepo)
-	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo, storeRepo, storeCategoryAssignmentRepo)
+	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo, storeRepo, storeCategoryAssignmentRepo, storeServiceScheduleRepo)
 
 	// Background jobs
 	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)

@@ -10,18 +10,14 @@ import (
 // fakeStoreRepository is a minimal StoreRepository test double; only the methods exercised by a
 // given test need a non-nil func field.
 type fakeStoreRepository struct {
-	createStoreWithSchedulesFunc func(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error
-	getStoreByIDFunc             func(ctx context.Context, id string) (*domain.Store, error)
-	updateStoreFunc              func(ctx context.Context, store *domain.Store) error
-	listStoresWithoutSlugFunc    func(ctx context.Context) ([]*domain.Store, error)
+	createStoreFunc           func(ctx context.Context, store *domain.Store) error
+	getStoreByIDFunc          func(ctx context.Context, id string) (*domain.Store, error)
+	updateStoreFunc           func(ctx context.Context, store *domain.Store) error
+	listStoresWithoutSlugFunc func(ctx context.Context) ([]*domain.Store, error)
 }
 
 func (f *fakeStoreRepository) CreateStore(ctx context.Context, store *domain.Store) error {
-	panic("not implemented")
-}
-
-func (f *fakeStoreRepository) CreateStoreWithSchedules(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error {
-	return f.createStoreWithSchedulesFunc(ctx, store, schedules)
+	return f.createStoreFunc(ctx, store)
 }
 
 func (f *fakeStoreRepository) GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error) {
@@ -52,17 +48,6 @@ func (f *fakeStoreRepository) ListStoresWithoutSlug(ctx context.Context) ([]*dom
 	return f.listStoresWithoutSlugFunc(ctx)
 }
 
-// fakeScheduleRepository is a minimal ScheduleRepository test double.
-type fakeScheduleRepository struct{}
-
-func (f *fakeScheduleRepository) UpsertStoreSchedule(ctx context.Context, schedule *domain.StoreSchedule) error {
-	panic("not implemented")
-}
-
-func (f *fakeScheduleRepository) ListStoreSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error) {
-	panic("not implemented")
-}
-
 // fakeStoreRatingSummaryRepository is a minimal StoreRatingSummaryRepository test double; unused
 // by these tests since none of them exercise rating summaries.
 type fakeStoreRatingSummaryRepository struct{}
@@ -78,12 +63,12 @@ func (f *fakeStoreRatingSummaryRepository) GetStoreRatingSummariesByStores(ctx c
 func TestCreate_SetsSlugFromName(t *testing.T) {
 	var captured *domain.Store
 	repo := &fakeStoreRepository{
-		createStoreWithSchedulesFunc: func(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error {
+		createStoreFunc: func(ctx context.Context, store *domain.Store) error {
 			captured = store
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	_, err := uc.Create(context.Background(), "user-1", "Café Sol", "desc", true, 30, "America/Bogota", true, "", "", true, "")
 	if err != nil {
@@ -107,7 +92,7 @@ func TestUpdate_NameChangeRecomputesSlug(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	newName := "New Name"
 	_, err := uc.Update(context.Background(), "store-1", &newName, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -132,7 +117,7 @@ func TestUpdate_NoNameChangeKeepsSlug(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	newDescription := "updated description"
 	_, err := uc.Update(context.Background(), "store-1", nil, &newDescription, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -160,7 +145,7 @@ func TestBackfillMissingSlugs(t *testing.T) {
 			return nil
 		},
 	}
-	uc := NewStoreUseCase(repo, &fakeScheduleRepository{}, &fakeStoreRatingSummaryRepository{})
+	uc := NewStoreUseCase(repo, &fakeStoreRatingSummaryRepository{})
 
 	count, err := uc.BackfillMissingSlugs(context.Background())
 	if err != nil {

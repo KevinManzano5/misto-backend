@@ -80,13 +80,14 @@ func (f *fakeAppointmentStoreRepository) GetStoreByID(ctx context.Context, store
 	return f.getStoreByIDFunc(ctx, storeID)
 }
 
-// fakeStoreScheduleRepository is a minimal StoreScheduleRepository test double.
-type fakeStoreScheduleRepository struct {
-	getStoreScheduleByDayFunc func(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error)
+// fakeStoreServiceScheduleRepository is a minimal AppointmentStoreServiceScheduleRepository test
+// double.
+type fakeStoreServiceScheduleRepository struct {
+	getStoreServiceScheduleByDayFunc func(ctx context.Context, storeServiceID string, dayOfWeek int32) (*domain.StoreServiceSchedule, error)
 }
 
-func (f *fakeStoreScheduleRepository) GetStoreScheduleByDay(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error) {
-	return f.getStoreScheduleByDayFunc(ctx, storeID, dayOfWeek)
+func (f *fakeStoreServiceScheduleRepository) GetStoreServiceScheduleByDay(ctx context.Context, storeServiceID string, dayOfWeek int32) (*domain.StoreServiceSchedule, error) {
+	return f.getStoreServiceScheduleByDayFunc(ctx, storeServiceID, dayOfWeek)
 }
 
 // fakeAppointmentStoreServiceRepository is a minimal AppointmentStoreServiceRepository test double.
@@ -422,7 +423,7 @@ func TestExpireOverdueAppointments_WrapsRepositoryError(t *testing.T) {
 // newCreateTestStores builds the store/schedule/service repo fakes shared by the Create payment
 // tests: a store whose schedule is open all day, every day, with a single active service
 // ("service-1") belonging to it, so only payment behavior is under test.
-func newCreateTestStores(autoConfirm bool) (*fakeAppointmentStoreRepository, *fakeStoreScheduleRepository, *fakeAppointmentStoreServiceRepository) {
+func newCreateTestStores(autoConfirm bool) (*fakeAppointmentStoreRepository, *fakeStoreServiceScheduleRepository, *fakeAppointmentStoreServiceRepository) {
 	storeRepo := &fakeAppointmentStoreRepository{
 		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
 			return &domain.Store{
@@ -435,9 +436,13 @@ func newCreateTestStores(autoConfirm bool) (*fakeAppointmentStoreRepository, *fa
 			}, nil
 		},
 	}
-	scheduleRepo := &fakeStoreScheduleRepository{
-		getStoreScheduleByDayFunc: func(ctx context.Context, storeID string, dayOfWeek int32) (*domain.StoreSchedule, error) {
-			return &domain.StoreSchedule{StoreID: storeID, DayOfWeek: dayOfWeek, OpenTime: "00:00", CloseTime: "23:59"}, nil
+	scheduleRepo := &fakeStoreServiceScheduleRepository{
+		getStoreServiceScheduleByDayFunc: func(ctx context.Context, storeServiceID string, dayOfWeek int32) (*domain.StoreServiceSchedule, error) {
+			return &domain.StoreServiceSchedule{
+				StoreServiceID: storeServiceID,
+				DayOfWeek:      dayOfWeek,
+				Segments:       []domain.StoreServiceScheduleSegment{{OpenTime: "00:00", CloseTime: "23:59"}},
+			}, nil
 		},
 	}
 	serviceRepo := &fakeAppointmentStoreServiceRepository{
@@ -782,6 +787,100 @@ func TestGetAvailableSlots_ExcludesSlotsWithinServiceMinLeadTime(t *testing.T) {
 		if slot < cutoff {
 			t.Fatalf("expected no slot before the lead-time cutoff %q, got %q", cutoff, slot)
 		}
+	}
+}
+
+// twoSegmentScheduleRepo returns a fakeStoreServiceScheduleRepository whose schedule for any day
+// has two segments with a gap between them: 08:00-12:00 and 13:30-17:30.
+func twoSegmentScheduleRepo() *fakeStoreServiceScheduleRepository {
+	return &fakeStoreServiceScheduleRepository{
+		getStoreServiceScheduleByDayFunc: func(ctx context.Context, storeServiceID string, dayOfWeek int32) (*domain.StoreServiceSchedule, error) {
+			return &domain.StoreServiceSchedule{
+				StoreServiceID: storeServiceID,
+				DayOfWeek:      dayOfWeek,
+				Segments: []domain.StoreServiceScheduleSegment{
+					{OpenTime: "08:00", CloseTime: "12:00"},
+					{OpenTime: "13:30", CloseTime: "17:30"},
+				},
+			}, nil
+		},
+	}
+}
+
+func TestGetAvailableSlots_TwoSegmentsWithGap(t *testing.T) {
+	storeRepo, _, _ := newCreateTestStores(true)
+	scheduleRepo := twoSegmentScheduleRepo()
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 60, IsActive: true}, nil
+		},
+	}
+	repo := &fakeAppointmentRepository{
+		listAppointmentsByStoreDateFunc: func(ctx context.Context, storeID string, startTime, endTime time.Time) ([]*domain.Appointment, error) {
+			return nil, nil
+		},
+	}
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	dateStr := time.Now().Add(48 * time.Hour).Format("2006-01-02")
+	slots, err := uc.GetAvailableSlots(context.Background(), "store-1", "service-1", dateStr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 08:00-12:00 with 60-minute slots: 08:00..11:00 (4 slots). 13:30-17:30: 13:30..16:30 (4 slots).
+	if len(slots) != 8 {
+		t.Fatalf("expected 8 one-hour slots across both segments, got %d: %v", len(slots), slots)
+	}
+	for _, slot := range slots {
+		if slot >= "12:00" && slot < "13:30" {
+			t.Fatalf("expected no slot within the 12:00-13:30 gap between segments, got %q in %v", slot, slots)
+		}
+	}
+	if slots[4] != "13:30" {
+		t.Fatalf("expected the first slot of the second segment to be 13:30, got %v", slots)
+	}
+}
+
+func TestCreate_RejectsAppointmentInGapBetweenSegments(t *testing.T) {
+	storeRepo, _, _ := newCreateTestStores(true)
+	scheduleRepo := twoSegmentScheduleRepo()
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 30, IsActive: true}, nil
+		},
+	}
+	uc := NewAppointmentUseCase(&fakeAppointmentRepository{}, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	// 12:15 UTC falls in the gap between the 08:00-12:00 and 13:30-17:30 segments.
+	baseDate := time.Now().UTC().Add(72 * time.Hour)
+	startTime := time.Date(baseDate.Year(), baseDate.Month(), baseDate.Day(), 12, 15, 0, 0, time.UTC)
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, startTime)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected %v, got %v", domain.ErrInvalidInput, err)
+	}
+}
+
+func TestCreate_AllowsAppointmentInSecondSegment(t *testing.T) {
+	storeRepo, _, _ := newCreateTestStores(true)
+	scheduleRepo := twoSegmentScheduleRepo()
+	serviceRepo := &fakeAppointmentStoreServiceRepository{
+		getStoreServiceByIDFunc: func(ctx context.Context, id string) (*domain.StoreService, error) {
+			return &domain.StoreService{ID: id, StoreID: "store-1", DurationMinutes: 30, IsActive: true}, nil
+		},
+	}
+	repo := &fakeAppointmentRepository{
+		createAppointmentFunc: func(ctx context.Context, appointment *domain.Appointment) error { return nil },
+	}
+	uc := NewAppointmentUseCase(repo, scheduleRepo, storeRepo, serviceRepo, &fakePaymentProcessor{}, &fakePaymentTransactionRepository{}, discardLogger())
+
+	baseDate := time.Now().UTC().Add(72 * time.Hour)
+	startTime := time.Date(baseDate.Year(), baseDate.Month(), baseDate.Day(), 14, 0, 0, 0, time.UTC)
+
+	_, err := uc.Create(context.Background(), "store-1", "service-1", "client-1", domain.PaymentMethodCashOnSite, startTime)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

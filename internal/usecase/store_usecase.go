@@ -8,16 +8,6 @@ import (
 	"github.com/KevinManzano5/misto-backend/internal/domain"
 )
 
-// defaultOpenTime and defaultCloseTime are the opening hours applied to every day of the week
-// when a store is created, until the owner customizes its schedule.
-const (
-	defaultOpenTime  = "09:00"
-	defaultCloseTime = "18:00"
-)
-
-// sunday is the domain.StoreSchedule.DayOfWeek value for Sunday, closed by default.
-const sunday = 0
-
 // defaultAppointmentDuration is applied to a store when it is created without one.
 const defaultAppointmentDuration = 30
 
@@ -36,7 +26,6 @@ func validateTimezone(name string) error {
 // StoreRepository interface
 type StoreRepository interface {
 	CreateStore(ctx context.Context, store *domain.Store) error
-	CreateStoreWithSchedules(ctx context.Context, store *domain.Store, schedules []*domain.StoreSchedule) error
 	GetStoreByID(ctx context.Context, storeID string) (*domain.Store, error)
 	GetStoreByUserID(ctx context.Context, userID string) (*domain.Store, error)
 	GetStoreBySlug(ctx context.Context, slug string) (*domain.Store, error)
@@ -44,12 +33,6 @@ type StoreRepository interface {
 	DeleteStore(ctx context.Context, id string) error
 	ListStores(ctx context.Context) ([]*domain.Store, error)
 	ListStoresWithoutSlug(ctx context.Context) ([]*domain.Store, error)
-}
-
-// ScheduleRepository interface
-type ScheduleRepository interface {
-	UpsertStoreSchedule(ctx context.Context, schedule *domain.StoreSchedule) error
-	ListStoreSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error)
 }
 
 // StoreRatingSummaryRepository interface (narrowed to what StoreUseCase needs to embed a store's
@@ -61,17 +44,15 @@ type StoreRatingSummaryRepository interface {
 
 // StoreUseCase struct
 type StoreUseCase struct {
-	repo         StoreRepository
-	scheduleRepo ScheduleRepository
-	ratingRepo   StoreRatingSummaryRepository
+	repo       StoreRepository
+	ratingRepo StoreRatingSummaryRepository
 }
 
 // NewStoreUseCase constructor
-func NewStoreUseCase(repo StoreRepository, scheduleRepo ScheduleRepository, ratingRepo StoreRatingSummaryRepository) *StoreUseCase {
+func NewStoreUseCase(repo StoreRepository, ratingRepo StoreRatingSummaryRepository) *StoreUseCase {
 	return &StoreUseCase{
-		repo:         repo,
-		scheduleRepo: scheduleRepo,
-		ratingRepo:   ratingRepo,
+		repo:       repo,
+		ratingRepo: ratingRepo,
 	}
 }
 
@@ -117,8 +98,7 @@ func (usecase *StoreUseCase) ListRatingSummaries(ctx context.Context, storeIDs [
 	return summaries, nil
 }
 
-// Create method creates a store along with a default weekly schedule (open every day
-// 09:00-18:00, except Sunday which is closed), which the owner can later customize.
+// Create method creates a store
 func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, description string, isActive bool, appointmentDuration int32, timezone string, autoConfirmAppointments bool, email, address string, allowSameDayAppointments bool, phoneNumber string) (*domain.Store, error) {
 	if appointmentDuration <= 0 {
 		appointmentDuration = defaultAppointmentDuration
@@ -132,26 +112,12 @@ func (usecase *StoreUseCase) Create(ctx context.Context, userID, name, descripti
 
 	slug := domain.SlugFromName(name)
 	store := domain.NewStore(userID, name, slug, description, isActive, appointmentDuration, timezone, autoConfirmAppointments, email, address, allowSameDayAppointments, phoneNumber)
-	schedules := defaultWeeklySchedules()
 
-	if err := usecase.repo.CreateStoreWithSchedules(ctx, store, schedules); err != nil {
+	if err := usecase.repo.CreateStore(ctx, store); err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
 
 	return store, nil
-}
-
-// defaultWeeklySchedules builds the default opening-hours schedule for all seven days of the
-// week, applied to every newly created store.
-func defaultWeeklySchedules() []*domain.StoreSchedule {
-	schedules := make([]*domain.StoreSchedule, 0, 7)
-
-	for dayOfWeek := int32(0); dayOfWeek <= 6; dayOfWeek++ {
-		isClosed := dayOfWeek == sunday
-		schedules = append(schedules, domain.NewStoreSchedule("", dayOfWeek, defaultOpenTime, defaultCloseTime, isClosed))
-	}
-
-	return schedules
 }
 
 // GetByID method
@@ -285,29 +251,4 @@ func (usecase *StoreUseCase) Delete(ctx context.Context, storeID string) error {
 	}
 
 	return nil
-}
-
-// UpsertSchedule method creates or updates the schedule of a store for a specific day
-func (usecase *StoreUseCase) UpsertSchedule(ctx context.Context, storeID string, dayOfWeek int32, openTime, closeTime string, isClosed bool) (*domain.StoreSchedule, error) {
-	schedule := domain.NewStoreSchedule(storeID, dayOfWeek, openTime, closeTime, isClosed)
-
-	if !schedule.IsValid() {
-		return nil, domain.ErrInvalidInput
-	}
-
-	if err := usecase.scheduleRepo.UpsertStoreSchedule(ctx, schedule); err != nil {
-		return nil, fmt.Errorf("upserting store schedule: %w", err)
-	}
-
-	return schedule, nil
-}
-
-// ListSchedules method retrieves all schedules for a store
-func (usecase *StoreUseCase) ListSchedules(ctx context.Context, storeID string) ([]*domain.StoreSchedule, error) {
-	schedules, err := usecase.scheduleRepo.ListStoreSchedules(ctx, storeID)
-	if err != nil {
-		return nil, fmt.Errorf("listing store schedules: %w", err)
-	}
-
-	return schedules, nil
 }

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -30,17 +32,18 @@ func NewStoreServiceHandler(usecase *usecase.StoreServiceUseCase, validator *val
 
 // storeServiceResponse struct
 type storeServiceResponse struct {
-	ID                 string    `json:"id"`
-	StoreID            string    `json:"store_id"`
-	CategoryID         string    `json:"category_id"`
-	Name               string    `json:"name"`
-	Description        string    `json:"description,omitempty"`
-	DurationMinutes    int32     `json:"duration_minutes"`
-	Price              float64   `json:"price"`
-	IsActive           bool      `json:"is_active"`
-	MinLeadTimeMinutes int32     `json:"min_lead_time_minutes"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string                         `json:"id"`
+	StoreID            string                         `json:"store_id"`
+	CategoryID         string                         `json:"category_id"`
+	Name               string                         `json:"name"`
+	Description        string                         `json:"description,omitempty"`
+	DurationMinutes    int32                          `json:"duration_minutes"`
+	Price              float64                        `json:"price"`
+	IsActive           bool                           `json:"is_active"`
+	MinLeadTimeMinutes int32                          `json:"min_lead_time_minutes"`
+	Schedules          []storeServiceScheduleResponse `json:"schedules"`
+	CreatedAt          time.Time                      `json:"created_at"`
+	UpdatedAt          time.Time                      `json:"updated_at"`
 }
 
 // toStoreServiceResponse function
@@ -58,6 +61,77 @@ func toStoreServiceResponse(service *domain.StoreService) storeServiceResponse {
 		CreatedAt:          service.CreatedAt,
 		UpdatedAt:          service.UpdatedAt,
 	}
+}
+
+// storeServiceScheduleSegmentRequest struct
+type storeServiceScheduleSegmentRequest struct {
+	OpenTime  string `json:"open_time" validate:"required,hhmm"`
+	CloseTime string `json:"close_time" validate:"required,hhmm"`
+}
+
+// upsertStoreServiceScheduleRequest struct
+type upsertStoreServiceScheduleRequest struct {
+	Segments []storeServiceScheduleSegmentRequest `json:"segments" validate:"required_if=IsClosed false,dive"`
+	IsClosed bool                                 `json:"is_closed"`
+}
+
+// storeServiceScheduleSegmentResponse struct
+type storeServiceScheduleSegmentResponse struct {
+	ID        string `json:"id"`
+	OpenTime  string `json:"open_time"`
+	CloseTime string `json:"close_time"`
+}
+
+// storeServiceScheduleResponse struct
+type storeServiceScheduleResponse struct {
+	ID             string                                `json:"id"`
+	StoreServiceID string                                `json:"store_service_id"`
+	DayOfWeek      int32                                 `json:"day_of_week"`
+	Segments       []storeServiceScheduleSegmentResponse `json:"segments"`
+	IsClosed       bool                                  `json:"is_closed"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	UpdatedAt      time.Time                             `json:"updated_at"`
+}
+
+// toStoreServiceScheduleResponse function
+func toStoreServiceScheduleResponse(schedule *domain.StoreServiceSchedule) storeServiceScheduleResponse {
+	segments := make([]storeServiceScheduleSegmentResponse, 0, len(schedule.Segments))
+	for _, segment := range schedule.Segments {
+		segments = append(segments, storeServiceScheduleSegmentResponse{
+			ID:        segment.ID,
+			OpenTime:  segment.OpenTime,
+			CloseTime: segment.CloseTime,
+		})
+	}
+
+	return storeServiceScheduleResponse{
+		ID:             schedule.ID,
+		StoreServiceID: schedule.StoreServiceID,
+		DayOfWeek:      schedule.DayOfWeek,
+		Segments:       segments,
+		IsClosed:       schedule.IsClosed,
+		CreatedAt:      schedule.CreatedAt,
+		UpdatedAt:      schedule.UpdatedAt,
+	}
+}
+
+// buildStoreServiceResponse composes a service's response, embedding its weekly schedule so
+// callers don't need a separate request to see it.
+func (handler *StoreServiceHandler) buildStoreServiceResponse(ctx context.Context, service *domain.StoreService) (storeServiceResponse, error) {
+	schedules, err := handler.usecase.ListSchedules(ctx, service.ID)
+	if err != nil {
+		return storeServiceResponse{}, fmt.Errorf("listing store service schedules: %w", err)
+	}
+
+	scheduleResponses := make([]storeServiceScheduleResponse, 0, len(schedules))
+	for _, schedule := range schedules {
+		scheduleResponses = append(scheduleResponses, toStoreServiceScheduleResponse(schedule))
+	}
+
+	response := toStoreServiceResponse(service)
+	response.Schedules = scheduleResponses
+
+	return response, nil
 }
 
 // createStoreServiceRequest struct
@@ -152,7 +226,13 @@ func (handler *StoreServiceHandler) Create(writer http.ResponseWriter, request *
 		return
 	}
 
-	if err := RespondJSON(writer, http.StatusCreated, toStoreServiceResponse(service)); err != nil {
+	response, err := handler.buildStoreServiceResponse(request.Context(), service)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusCreated, response); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",
@@ -214,7 +294,13 @@ func (handler *StoreServiceHandler) Update(writer http.ResponseWriter, request *
 		return
 	}
 
-	if err := RespondJSON(writer, http.StatusOK, toStoreServiceResponse(service)); err != nil {
+	response, err := handler.buildStoreServiceResponse(request.Context(), service)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",
@@ -275,10 +361,78 @@ func (handler *StoreServiceHandler) ListByStore(writer http.ResponseWriter, requ
 
 	response := make([]storeServiceResponse, 0, len(services))
 	for _, service := range services {
-		response = append(response, toStoreServiceResponse(service))
+		serviceResponse, err := handler.buildStoreServiceResponse(request.Context(), service)
+		if err != nil {
+			RespondError(writer, request, handler.logger, err)
+			return
+		}
+		response = append(response, serviceResponse)
 	}
 
 	if err := RespondJSON(writer, http.StatusOK, response); err != nil {
+		handler.logger.ErrorContext(
+			request.Context(),
+			"error trying to write JSON response",
+			"error", err,
+			"method", request.Method,
+			"path", request.URL.Path,
+		)
+	}
+}
+
+// UpsertSchedule endpoint (PUT /api/v1/services/{serviceId}/schedules/{day}). Creates or updates
+// a service's schedule for a specific day; only the store's owner may call this.
+//
+// @Summary Upsert a store service's schedule for a day
+// @Description Creates or updates the segmented opening hours of a service for a specific day of the week.
+// @Tags store_services
+// @Accept json
+// @Produce json
+// @Param serviceId path string true "Service ID"
+// @Param day path string true "Day of week (0=Sunday..6=Saturday)"
+// @Param request body upsertStoreServiceScheduleRequest true "Schedule data"
+// @Success 200 {object} storeServiceScheduleResponse
+// @Router /services/{serviceId}/schedules/{day} [put]
+func (handler *StoreServiceHandler) UpsertSchedule(writer http.ResponseWriter, request *http.Request) {
+	serviceID := request.PathValue("serviceId")
+
+	dayOfWeek, err := parseDayOfWeek(request.PathValue("day"))
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	var req upsertStoreServiceScheduleRequest
+	if err := decodeStoreServiceJSONBody(request, &req); err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if validationErrs := handler.validator.Validate(req); validationErrs != nil {
+		if err := RespondValidationError(writer, validationErrs); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"error trying to create validation response",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+		return
+	}
+
+	segments := make([]domain.StoreServiceScheduleSegment, 0, len(req.Segments))
+	for _, segment := range req.Segments {
+		segments = append(segments, domain.StoreServiceScheduleSegment{OpenTime: segment.OpenTime, CloseTime: segment.CloseTime})
+	}
+
+	schedule, err := handler.usecase.UpsertSchedule(request.Context(), serviceID, middlewares.GetUserID(request), dayOfWeek, segments, req.IsClosed)
+	if err != nil {
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	if err := RespondJSON(writer, http.StatusOK, toStoreServiceScheduleResponse(schedule)); err != nil {
 		handler.logger.ErrorContext(
 			request.Context(),
 			"error trying to write JSON response",

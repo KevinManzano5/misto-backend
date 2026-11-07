@@ -4,6 +4,7 @@ package validator
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -15,9 +16,22 @@ type Validator struct {
 
 // New function
 func New() *Validator {
-	return &Validator{
-		validate: validator.New(validator.WithRequiredStructEnabled()),
+	v := validator.New(validator.WithRequiredStructEnabled())
+	_ = v.RegisterValidation("hhmm", validateHHMM)
+
+	return &Validator{validate: v}
+}
+
+// validateHHMM checks that a field is a clock time in "HH:MM" or "HH:MM:SS" format.
+func validateHHMM(fl validator.FieldLevel) bool {
+	value := fl.Field().String()
+
+	if _, err := time.Parse("15:04:05", value); err == nil {
+		return true
 	}
+
+	_, err := time.Parse("15:04", value)
+	return err == nil
 }
 
 // ValidationError struct
@@ -67,6 +81,8 @@ func translateTag(e validator.FieldError) string {
 		return fmt.Sprintf("must have at least %s characters", e.Param())
 	case "max":
 		return fmt.Sprintf("it must have a maximum of %s characters", e.Param())
+	case "hhmm":
+		return "must be a valid HH:MM time"
 	default:
 		return "invalid value"
 	}
