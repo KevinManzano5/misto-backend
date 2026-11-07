@@ -104,6 +104,32 @@ func RequireAuth(jwtManager *auth.JWTManager, logger *slog.Logger) Middleware {
 	}
 }
 
+// OptionalAuth attaches *auth.Claims to the request context when a valid bearer token is
+// present, but never rejects the request — unlike RequireAuth, a missing or invalid token just
+// means the request continues without claims. Used on public endpoints that behave differently
+// for an authenticated (e.g. admin) caller while staying reachable anonymously.
+func OptionalAuth(jwtManager *auth.JWTManager, logger *slog.Logger) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenString, err := extractBearerToken(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			claims, err := jwtManager.VerifyToken(tokenString)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), claimsKey, claims)
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // GetClaims function
 func GetClaims(req *http.Request) *auth.Claims {
 	claims, _ := req.Context().Value(claimsKey).(*auth.Claims)

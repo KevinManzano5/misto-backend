@@ -73,6 +73,17 @@ WHERE id = $1
   AND deleted_at IS NULL
 RETURNING *;
 
+-- name: UpdateStoreAppUsageFeePercentage :one
+-- Admin-only: separate from UpdateStore so this field is never reachable through the store
+-- owner's own update flow.
+UPDATE stores
+SET
+    app_usage_fee_percentage = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+  AND deleted_at IS NULL
+RETURNING *;
+
 -- name: DeleteStore :exec
 -- Soft delete: Updates `deleted_at` instead of deleting the row.
 UPDATE stores

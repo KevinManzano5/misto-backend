@@ -152,9 +152,10 @@ func main() {
 	// Initialization of specific middlewares
 	authMW := middlewares.RequireAuth(jwtManager, log)
 	adminMW := middlewares.RequireRole(domain.RoleAdmin, log)
+	optionalAuthMW := middlewares.OptionalAuth(jwtManager, log)
 
 	// Routing injection
-	router.SetupRoutes(srv, handlers, authMW, adminMW)
+	router.SetupRoutes(srv, handlers, authMW, adminMW, optionalAuthMW)
 
 	// Server startup
 	if err := srv.Start(); err != nil {

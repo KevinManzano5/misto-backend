@@ -22,10 +22,10 @@ type AppHandlers struct {
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
-func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW middlewares.Middleware) {
+func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW, optionalAuthMW middlewares.Middleware) {
 	setupSystemRoutes(srv, h.Health)
 	setupAuthRoutes(srv, h.Auth, h.User, authMW, adminMW)
-	setupStoreRoutes(srv, h.Store, authMW)
+	setupStoreRoutes(srv, h.Store, authMW, adminMW, optionalAuthMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
 	setupStoreCategoryRoutes(srv, h.StoreCategory)
@@ -57,16 +57,17 @@ func setupAuthRoutes(srv *server.Server, auth *handler.AuthHandler, user *handle
 }
 
 // setupStoreRoutes registers endpoints for managing stores (mixed).
-func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW middlewares.Middleware) {
+func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW, adminMW, optionalAuthMW middlewares.Middleware) {
 	// Helper for wrapping protected handlers
 	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
 		return middlewares.Chain(handlerFunc, authMW)
 	}
 
 	// === Store routes ===
-	// Public
-	srv.RegisterRoutes("GET /api/v1/stores", http.HandlerFunc(store.ListStores))
-	srv.RegisterRoutes("GET /api/v1/stores/{id}", http.HandlerFunc(store.GetStoreByID))
+	// Public, but reads claims if a token is present so an admin caller also sees the app usage
+	// fee in the response (see store.buildStoreResponse).
+	srv.RegisterRoutes("GET /api/v1/stores", middlewares.Chain(http.HandlerFunc(store.ListStores), optionalAuthMW))
+	srv.RegisterRoutes("GET /api/v1/stores/{id}", middlewares.Chain(http.HandlerFunc(store.GetStoreByID), optionalAuthMW))
 
 	// Private
 	srv.RegisterRoutes("POST /api/v1/stores", withAuth(store.Create))
@@ -77,6 +78,12 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW mi
 	// Private. A store's assigned categories are embedded directly in its GET response
 	// (storeResponse.Categories), so there is no separate read endpoint for them.
 	srv.RegisterRoutes("PUT /api/v1/stores/{id}/categories", withAuth(store.ReplaceCategories))
+
+	// === Store app usage fee routes ===
+	// Admin-only. The fee the platform charges a store for app usage is never exposed through
+	// the store owner's own GET/PATCH flow above.
+	srv.RegisterRoutes("GET /api/v1/stores/{id}/fee", middlewares.Chain(http.HandlerFunc(store.GetStoreFee), authMW, adminMW))
+	srv.RegisterRoutes("PATCH /api/v1/stores/{id}/fee", middlewares.Chain(http.HandlerFunc(store.UpdateStoreFee), authMW, adminMW))
 }
 
 // setupStoreCategoryRoutes registers endpoints for the store category catalog (public).

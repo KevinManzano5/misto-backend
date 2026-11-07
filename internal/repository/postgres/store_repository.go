@@ -52,6 +52,7 @@ func toDomainStore(store postgres.Store) *domain.Store {
 		PhoneNumber:              phoneNumber,
 		CashOnSiteEnabled:        store.CashOnSiteEnabled,
 		CardAdvanceEnabled:       store.CardAdvanceEnabled,
+		AppUsageFeePercentage:    int32(store.AppUsageFeePercentage),
 		CreatedAt:                store.CreatedAt.Time.UTC(),
 		UpdatedAt:                store.UpdatedAt.Time.UTC(),
 	}
@@ -197,6 +198,31 @@ func (repo *StoreRepository) UpdateStore(ctx context.Context, store *domain.Stor
 	}
 
 	return nil
+}
+
+// UpdateAppUsageFeePercentage method sets the platform's app-usage fee percentage for a store.
+// Admin-only: authorization is enforced by the handler/route, not here.
+func (repo *StoreRepository) UpdateAppUsageFeePercentage(ctx context.Context, id string, percentage int32) (*domain.Store, error) {
+	var storeID pgtype.UUID
+
+	if err := storeID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid storeID: %w", domain.ErrInvalidInput)
+	}
+
+	result, err := repo.queries.UpdateStoreAppUsageFeePercentage(ctx, postgres.UpdateStoreAppUsageFeePercentageParams{
+		ID:                    storeID,
+		AppUsageFeePercentage: int16(percentage),
+	})
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("store with id %s: %w", id, domain.ErrNotFound)
+		}
+
+		return nil, fmt.Errorf("updating app usage fee percentage for store %s: %w", id, err)
+	}
+
+	return toDomainStore(result), nil
 }
 
 // DeleteStore method

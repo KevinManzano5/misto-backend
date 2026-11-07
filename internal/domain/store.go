@@ -43,8 +43,12 @@ type Store struct {
 	// CardAdvanceEnabled controls whether clients can choose to pay by card in advance when
 	// booking an appointment.
 	CardAdvanceEnabled bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// AppUsageFeePercentage is the percentage (0-100) the platform charges the store for app
+	// usage. Visible and editable only by platform administrators — never exposed via the store
+	// owner's own update/response flow.
+	AppUsageFeePercentage int32
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // NewStore function
@@ -122,6 +126,14 @@ func SlugFromName(name string) string {
 	}
 
 	return slug
+}
+
+// ApplyPercentageFee adds a percentage fee on top of amount, rounded to the nearest whole unit
+// (round-half-up). Used for COP amounts, which have no decimal subunit, so the fee itself must
+// be a whole number of pesos.
+func ApplyPercentageFee(amount int64, feePercentage int32) int64 {
+	fee := (amount*int64(feePercentage) + 50) / 100
+	return amount + fee
 }
 
 // randomSlugSuffix returns an 8 hex-character random suffix used as a fallback slug for names

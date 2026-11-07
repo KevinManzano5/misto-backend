@@ -54,6 +54,7 @@ type Store struct {
 	Slug                     *string            `json:"slug"`
 	CashOnSiteEnabled        bool               `json:"cash_on_site_enabled"`
 	CardAdvanceEnabled       bool               `json:"card_advance_enabled"`
+	AppUsageFeePercentage    int16              `json:"app_usage_fee_percentage"`
 }
 
 type StoreCategory struct {

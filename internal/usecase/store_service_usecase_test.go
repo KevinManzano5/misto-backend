@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/KevinManzano5/misto-backend/internal/domain"
@@ -329,5 +330,36 @@ func TestUpsertSchedule_AcceptsTwoSegmentsWithGap(t *testing.T) {
 	}
 	if saved == nil {
 		t.Fatalf("expected UpsertStoreServiceSchedule to be called")
+	}
+}
+
+func TestGetAppUsageFeePercentage_ReturnsStoreFee(t *testing.T) {
+	storeRepo := &fakeStoreServiceStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return &domain.Store{ID: storeID, AppUsageFeePercentage: 10}, nil
+		},
+	}
+	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, storeRepo, assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
+
+	got, err := uc.GetAppUsageFeePercentage(context.Background(), "store-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 10 {
+		t.Errorf("GetAppUsageFeePercentage() = %d, want 10", got)
+	}
+}
+
+func TestGetAppUsageFeePercentage_PropagatesNotFound(t *testing.T) {
+	storeRepo := &fakeStoreServiceStoreRepository{
+		getStoreByIDFunc: func(ctx context.Context, storeID string) (*domain.Store, error) {
+			return nil, fmt.Errorf("store with id %s: %w", storeID, domain.ErrNotFound)
+		},
+	}
+	uc := NewStoreServiceUseCase(&fakeStoreServiceRepository{}, storeRepo, assignedCategoryRepo(), &fakeStoreServiceScheduleRepositoryForService{})
+
+	_, err := uc.GetAppUsageFeePercentage(context.Background(), "missing-store")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("error = %v, want wrapping domain.ErrNotFound", err)
 	}
 }

@@ -105,8 +105,8 @@ func (usecase *AppointmentUseCase) resolveService(ctx context.Context, storeID, 
 // caller's flow: appointments.payment_status (the source of truth) has already been decided
 // independently of this write, and failing a user's booking/confirmation over an audit-log
 // failure would be worse than a best-effort gap in the history.
-func (usecase *AppointmentUseCase) recordPaymentTransaction(ctx context.Context, appointmentID, paymentMethod, status, failureReason string) {
-	transaction := domain.NewPaymentTransaction(appointmentID, 0, status, paymentMethod, failureReason)
+func (usecase *AppointmentUseCase) recordPaymentTransaction(ctx context.Context, appointmentID string, amount int64, paymentMethod, status, failureReason string) {
+	transaction := domain.NewPaymentTransaction(appointmentID, amount, status, paymentMethod, failureReason)
 	if err := usecase.paymentTransactionRepo.CreatePaymentTransaction(ctx, transaction); err != nil {
 		usecase.log.Error("failed to record payment transaction", slog.String("appointment_id", appointmentID), slog.Any("error", err))
 	}
@@ -205,7 +205,8 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 			transactionStatus, failureReason = domain.PaymentStatusFailed, chargeErr.Error()
 		}
 	}
-	usecase.recordPaymentTransaction(ctx, appointment.ID, paymentMethod, transactionStatus, failureReason)
+	amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
+	usecase.recordPaymentTransaction(ctx, appointment.ID, amount, paymentMethod, transactionStatus, failureReason)
 
 	return appointment, nil
 }
@@ -242,7 +243,13 @@ func (usecase *AppointmentUseCase) ConfirmCashPayment(ctx context.Context, appoi
 		return nil, fmt.Errorf("confirming cash payment: %w", err)
 	}
 
-	usecase.recordPaymentTransaction(ctx, appointmentID, domain.PaymentMethodCashOnSite, domain.PaymentStatusPaid, "")
+	service, err := usecase.storeServiceRepo.GetStoreServiceByID(ctx, appointment.ServiceID)
+	if err != nil {
+		return nil, fmt.Errorf("getting store service: %w", err)
+	}
+
+	amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
+	usecase.recordPaymentTransaction(ctx, appointmentID, amount, domain.PaymentMethodCashOnSite, domain.PaymentStatusPaid, "")
 
 	return updated, nil
 }
@@ -627,10 +634,16 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 	if newStatus == domain.AppointmentStatusConfirmed &&
 		appointment.PaymentMethod == domain.PaymentMethodCardAdvance &&
 		appointment.PaymentStatus != domain.PaymentStatusPaid {
+		service, err := usecase.storeServiceRepo.GetStoreServiceByID(ctx, appointment.ServiceID)
+		if err != nil {
+			return nil, fmt.Errorf("getting store service: %w", err)
+		}
+		amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
+
 		chargeErr := usecase.paymentProcessor.Charge(ctx, appointment)
 
 		if chargeErr != nil {
-			usecase.recordPaymentTransaction(ctx, appointmentID, appointment.PaymentMethod, domain.PaymentStatusFailed, chargeErr.Error())
+			usecase.recordPaymentTransaction(ctx, appointmentID, amount, appointment.PaymentMethod, domain.PaymentStatusFailed, chargeErr.Error())
 
 			if _, updateErr := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusFailed); updateErr != nil {
 				return nil, fmt.Errorf("recording failed payment: %w", updateErr)
@@ -638,7 +651,7 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 			return nil, fmt.Errorf("charging card payment: %w", domain.ErrPaymentFailed)
 		}
 
-		usecase.recordPaymentTransaction(ctx, appointmentID, appointment.PaymentMethod, domain.PaymentStatusPaid, "")
+		usecase.recordPaymentTransaction(ctx, appointmentID, amount, appointment.PaymentMethod, domain.PaymentStatusPaid, "")
 
 		if _, err := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusPaid); err != nil {
 			return nil, fmt.Errorf("recording payment: %w", err)
