@@ -147,7 +147,7 @@ func main() {
 		Store:                 handler.NewStoreHandler(storeUC, storeCategoryAssignmentUC, paymentMethodSettingsUC, validate, log),
 		Appointment:           handler.NewAppointmentHandler(appointmentUC, storeRatingUC, validate, log),
 		StoreRating:           handler.NewStoreRatingHandler(storeRatingUC, validate, log),
-		StoreCategory:         handler.NewStoreCategoryHandler(storeCategoryUC, log),
+		StoreCategory:         handler.NewStoreCategoryHandler(storeCategoryUC, validate, log),
 		StoreService:          handler.NewStoreServiceHandler(storeServiceUC, validate, log),
 		PaymentMethodSettings: handler.NewPaymentMethodSettingsHandler(paymentMethodSettingsUC, validate, log),
 	}

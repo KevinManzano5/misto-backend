@@ -12,3 +12,21 @@ type StoreCategory struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+// NewStoreCategory constructor
+func NewStoreCategory(name, slug, description string) *StoreCategory {
+	now := time.Now()
+
+	return &StoreCategory{
+		Name:        name,
+		Slug:        slug,
+		Description: description,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+}
+
+// IsValid reports whether the category has the minimum data required to be persisted.
+func (category *StoreCategory) IsValid() bool {
+	return category.Name != "" && category.Slug != ""
+}

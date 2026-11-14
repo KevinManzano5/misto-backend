@@ -29,7 +29,7 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW, optionalAu
 	setupStoreRoutes(srv, h.Store, authMW, adminMW, optionalAuthMW)
 	setupAppointmentRoutes(srv, h.Appointment, authMW)
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
-	setupStoreCategoryRoutes(srv, h.StoreCategory)
+	setupStoreCategoryRoutes(srv, h.StoreCategory, authMW, adminMW)
 	setupStoreServiceRoutes(srv, h.StoreService, authMW)
 }
 
@@ -92,9 +92,21 @@ func setupStoreRoutes(srv *server.Server, store *handler.StoreHandler, authMW, a
 	srv.RegisterRoutes("PATCH /api/v1/stores/{id}/fee", middlewares.Chain(http.HandlerFunc(store.UpdateStoreFee), authMW, adminMW))
 }
 
-// setupStoreCategoryRoutes registers endpoints for the store category catalog (public).
-func setupStoreCategoryRoutes(srv *server.Server, category *handler.StoreCategoryHandler) {
+// setupStoreCategoryRoutes registers endpoints for the store category catalog (mixed). Listing
+// is public; creating, updating, and deleting catalog entries is admin-only.
+func setupStoreCategoryRoutes(srv *server.Server, category *handler.StoreCategoryHandler, authMW, adminMW middlewares.Middleware) {
+	// Helper for wrapping admin-only handlers
+	withAdmin := func(handlerFunc http.HandlerFunc) http.Handler {
+		return middlewares.Chain(handlerFunc, authMW, adminMW)
+	}
+
+	// Public
 	srv.RegisterRoutes("GET /api/v1/store-categories", http.HandlerFunc(category.ListCategories))
+
+	// Admin-only
+	srv.RegisterRoutes("POST /api/v1/store-categories", withAdmin(category.Create))
+	srv.RegisterRoutes("PATCH /api/v1/store-categories/{id}", withAdmin(category.Update))
+	srv.RegisterRoutes("DELETE /api/v1/store-categories/{id}", withAdmin(category.Delete))
 }
 
 // setupAppointmentRoutes registers endpoints for appointment management (mixed)

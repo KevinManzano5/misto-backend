@@ -3,6 +3,7 @@ package validator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,8 +19,17 @@ type Validator struct {
 func New() *Validator {
 	v := validator.New(validator.WithRequiredStructEnabled())
 	_ = v.RegisterValidation("hhmm", validateHHMM)
+	_ = v.RegisterValidation("slug", validateSlug)
 
 	return &Validator{validate: v}
+}
+
+// slugPattern matches lowercase, hyphen-separated slugs (e.g. "hair-salon").
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// validateSlug checks that a field is a lowercase, hyphen-separated slug.
+func validateSlug(fl validator.FieldLevel) bool {
+	return slugPattern.MatchString(fl.Field().String())
 }
 
 // validateHHMM checks that a field is a clock time in "HH:MM" or "HH:MM:SS" format.
@@ -83,6 +93,8 @@ func translateTag(e validator.FieldError) string {
 		return fmt.Sprintf("it must have a maximum of %s characters", e.Param())
 	case "hhmm":
 		return "must be a valid HH:MM time"
+	case "slug":
+		return "must be lowercase, alphanumeric, and hyphen-separated (e.g. \"hair-salon\")"
 	default:
 		return "invalid value"
 	}

@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createStoreCategory = `-- name: CreateStoreCategory :one
+INSERT INTO store_categories (name, slug, description)
+VALUES ($1, $2, $3)
+RETURNING id, name, slug, description, created_at, updated_at
+`
+
+type CreateStoreCategoryParams struct {
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	Description *string `json:"description"`
+}
+
+func (q *Queries) CreateStoreCategory(ctx context.Context, arg CreateStoreCategoryParams) (StoreCategory, error) {
+	row := q.db.QueryRow(ctx, createStoreCategory, arg.Name, arg.Slug, arg.Description)
+	var i StoreCategory
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteStoreCategory = `-- name: DeleteStoreCategory :exec
+DELETE FROM store_categories
+WHERE id = $1
+`
+
+func (q *Queries) DeleteStoreCategory(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteStoreCategory, id)
+	return err
+}
+
 const getStoreCategoryByID = `-- name: GetStoreCategoryByID :one
 SELECT id, name, slug, description, created_at, updated_at FROM store_categories
 WHERE id = $1
@@ -62,4 +98,41 @@ func (q *Queries) ListStoreCategories(ctx context.Context) ([]StoreCategory, err
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateStoreCategory = `-- name: UpdateStoreCategory :one
+UPDATE store_categories
+SET
+    name        = $2,
+    slug        = $3,
+    description = $4,
+    updated_at  = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, name, slug, description, created_at, updated_at
+`
+
+type UpdateStoreCategoryParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Slug        string      `json:"slug"`
+	Description *string     `json:"description"`
+}
+
+func (q *Queries) UpdateStoreCategory(ctx context.Context, arg UpdateStoreCategoryParams) (StoreCategory, error) {
+	row := q.db.QueryRow(ctx, updateStoreCategory,
+		arg.ID,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+	)
+	var i StoreCategory
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
