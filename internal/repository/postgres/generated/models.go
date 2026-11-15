@@ -23,6 +23,16 @@ type Appointment struct {
 	ServiceID          pgtype.UUID        `json:"service_id"`
 }
 
+type DebtTransaction struct {
+	ID            pgtype.UUID        `json:"id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	StoreID       pgtype.UUID        `json:"store_id"`
+	AppointmentID pgtype.UUID        `json:"appointment_id"`
+	Amount        int64              `json:"amount"`
+	Type          string             `json:"type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type PaymentMethodSetting struct {
 	ID                 int16              `json:"id"`
 	CashOnSiteEnabled  bool               `json:"cash_on_site_enabled"`
@@ -135,4 +145,13 @@ type User struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Role         string             `json:"role"`
+}
+
+type UserDebt struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	Balance   int64              `json:"balance"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

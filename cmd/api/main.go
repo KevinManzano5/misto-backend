@@ -97,18 +97,20 @@ func main() {
 	storeCategoryAssignmentRepo := postgres.NewStoreCategoryAssignmentRepository(pool)
 	storeServiceRepo := postgres.NewStoreServiceRepository(pool)
 	paymentMethodSettingsRepo := postgres.NewPaymentMethodSettingsRepository(pool)
+	debtRepo := postgres.NewDebtRepository(pool)
 
 	// Instantiation of use cases
 	userUC := usecase.NewUserUseCase(userRepo)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtManager, tokenStore, refreshTokenDuration)
 	storeUC := usecase.NewStoreUseCase(storeRepo, storeRatingRepo)
 	paymentProcessor := payment.NewStubProcessor()
-	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeServiceScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, paymentMethodSettingsRepo, log)
+	appointmentUC := usecase.NewAppointmentUseCase(appointmentRepo, storeServiceScheduleRepo, storeRepo, storeServiceRepo, paymentProcessor, paymentTransactionRepo, paymentMethodSettingsRepo, debtRepo, log)
 	storeRatingUC := usecase.NewStoreRatingUseCase(storeRatingRepo, appointmentRepo)
 	storeCategoryUC := usecase.NewStoreCategoryUseCase(storeCategoryRepo)
 	storeCategoryAssignmentUC := usecase.NewStoreCategoryAssignmentUseCase(storeCategoryAssignmentRepo, storeRepo)
 	storeServiceUC := usecase.NewStoreServiceUseCase(storeServiceRepo, storeRepo, storeCategoryAssignmentRepo, storeServiceScheduleRepo)
 	paymentMethodSettingsUC := usecase.NewPaymentMethodSettingsUseCase(paymentMethodSettingsRepo, log)
+	debtUC := usecase.NewDebtUseCase(debtRepo, storeRepo)
 
 	// Background jobs
 	appointmentExpiryInterval := appointmentExpiryIntervalFromEnv(log)
@@ -150,6 +152,7 @@ func main() {
 		StoreCategory:         handler.NewStoreCategoryHandler(storeCategoryUC, validate, log),
 		StoreService:          handler.NewStoreServiceHandler(storeServiceUC, validate, log),
 		PaymentMethodSettings: handler.NewPaymentMethodSettingsHandler(paymentMethodSettingsUC, validate, log),
+		Debt:                  handler.NewDebtHandler(debtUC, validate, log),
 	}
 
 	// Initialization of specific middlewares

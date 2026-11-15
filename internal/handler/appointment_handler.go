@@ -468,21 +468,63 @@ func (handler *AppointmentHandler) UpdateStatus(writer http.ResponseWriter, requ
 	}
 }
 
-// ConfirmCashPayment endpoint (e.g., PATCH /appointments/{id}/confirm-cash-payment)
+// payAppointmentDebtRequest struct. Paid must be true (the "required" tag fails on bool's zero
+// value, false), since there's nothing to settle otherwise.
+type payAppointmentDebtRequest struct {
+	Paid bool `json:"paid" validate:"required"`
+}
+
+// PayDebt endpoint (e.g., PATCH /appointments/{id}/pay-debt)
 //
-// @Summary Confirm a cash_on_site payment was received
-// @Description Marks a cash_on_site appointment's payment as paid. Only the store's owner may call this, and only while the payment is pending.
+// @Summary Settle a cash_on_site appointment's debt
+// @Description Confirms the money for a cash_on_site appointment was collected: settles exactly that appointment's own price against the client's debt with the store and marks it as paid. Only the store's owner may call this, and only while the appointment still has an open debt.
 // @Tags appointments
+// @Accept json
 // @Produce json
 // @Param id path string true "Appointment ID"
+// @Param request body payAppointmentDebtRequest true "Debt settlement confirmation"
 // @Success 200 {object} appointmentResponse
 // @Failure 400 {object} ProblemDetails
 // @Failure 403 {object} ProblemDetails
-// @Router /appointments/{id}/confirm-cash-payment [patch]
-func (handler *AppointmentHandler) ConfirmCashPayment(writer http.ResponseWriter, request *http.Request) {
+// @Router /appointments/{id}/pay-debt [patch]
+func (handler *AppointmentHandler) PayDebt(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("id")
 
-	appointment, err := handler.usecase.ConfirmCashPayment(request.Context(), id, middlewares.GetUserID(request))
+	if request.Body == nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+	defer func() {
+		if err := request.Body.Close(); err != nil {
+			handler.logger.ErrorContext(
+				request.Context(),
+				"failed to close request body",
+				"error", err,
+				"method", request.Method,
+				"path", request.URL.Path,
+			)
+		}
+	}()
+
+	var req payAppointmentDebtRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&req); err != nil {
+		RespondError(writer, request, handler.logger, domain.ErrInvalidInput)
+		return
+	}
+
+	if validationErrs := handler.validator.Validate(req); validationErrs != nil {
+		err := &ValidationErrorContext{
+			Err:     domain.ErrInvalidInput,
+			Details: validationErrs,
+		}
+		RespondError(writer, request, handler.logger, err)
+		return
+	}
+
+	appointment, err := handler.usecase.PayDebt(request.Context(), id, middlewares.GetUserID(request), req.Paid)
 	if err != nil {
 		RespondError(writer, request, handler.logger, err)
 		return

@@ -20,6 +20,7 @@ type AppHandlers struct {
 	StoreCategory         *handler.StoreCategoryHandler
 	StoreService          *handler.StoreServiceHandler
 	PaymentMethodSettings *handler.PaymentMethodSettingsHandler
+	Debt                  *handler.DebtHandler
 }
 
 // setupRoutes orchestrates the configuration of all system routes, organized by module.
@@ -31,6 +32,7 @@ func SetupRoutes(srv *server.Server, h *AppHandlers, authMW, adminMW, optionalAu
 	setupStoreRatingRoutes(srv, h.StoreRating, authMW)
 	setupStoreCategoryRoutes(srv, h.StoreCategory, authMW, adminMW)
 	setupStoreServiceRoutes(srv, h.StoreService, authMW)
+	setupDebtRoutes(srv, h.Debt, authMW)
 }
 
 // setupSystemRoutes registers health/documentation endpoints (public) and platform-wide payment
@@ -126,8 +128,21 @@ func setupAppointmentRoutes(srv *server.Server, appointment *handler.Appointment
 	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/appointments/me", withAuth(appointment.GetActiveAppointmentStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/status", withAuth(appointment.UpdateStatus))
 	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/cancel", withAuth(appointment.Cancel))
-	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/confirm-cash-payment", withAuth(appointment.ConfirmCashPayment))
+	srv.RegisterRoutes("PATCH /api/v1/appointments/{id}/pay-debt", withAuth(appointment.PayDebt))
 	srv.RegisterRoutes("GET /api/v1/appointments/{id}/transactions", withAuth(appointment.ListPaymentTransactions))
+}
+
+// setupDebtRoutes registers endpoints for a client's debt with a store, opened by cash_on_site
+// appointments whose money was never collected (private, all behind auth).
+func setupDebtRoutes(srv *server.Server, debt *handler.DebtHandler, authMW middlewares.Middleware) {
+	withAuth := func(handlerFunc http.HandlerFunc) http.Handler {
+		return middlewares.Chain(handlerFunc, authMW)
+	}
+
+	srv.RegisterRoutes("GET /api/v1/me/debts", withAuth(debt.ListMyDebts))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/debts", withAuth(debt.ListDebtorsByStore))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/debts/{userId}", withAuth(debt.Get))
+	srv.RegisterRoutes("GET /api/v1/stores/{storeId}/debts/{userId}/transactions", withAuth(debt.ListTransactions))
 }
 
 // setupStoreRatingRoutes registers endpoints for rating a store's completed appointments (mixed).
