@@ -60,6 +60,16 @@ type PaymentTransactionRepository interface {
 	ListPaymentTransactionsByAppointment(ctx context.Context, appointmentID string) ([]*domain.PaymentTransaction, error)
 }
 
+// AppointmentDebtRepository interface (narrowed to what AppointmentUseCase needs to open,
+// reverse, or settle a client's debt with a store, opened by a cash_on_site appointment)
+type AppointmentDebtRepository interface {
+	AddDebt(ctx context.Context, userID, storeID, appointmentID string, amount int64) error
+	ReverseDebt(ctx context.Context, userID, storeID, appointmentID string, amount int64) error
+	// SettleDebt confirms the amount owed by appointmentID was collected: it decrements the
+	// client's aggregate debt with the store and returns the appointment, now marked paid.
+	SettleDebt(ctx context.Context, userID, storeID, appointmentID string, amount int64) (*domain.Appointment, error)
+}
+
 // AppointmentUseCase struct
 type AppointmentUseCase struct {
 	repo                      AppointmentRepository
@@ -69,11 +79,12 @@ type AppointmentUseCase struct {
 	paymentProcessor          PaymentProcessor
 	paymentTransactionRepo    PaymentTransactionRepository
 	paymentMethodSettingsRepo AppointmentPaymentMethodSettingsRepository
+	debtRepo                  AppointmentDebtRepository
 	log                       *slog.Logger
 }
 
 // NewAppointmentUseCase constructor
-func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentStoreServiceScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, paymentMethodSettingsRepo AppointmentPaymentMethodSettingsRepository, log *slog.Logger) *AppointmentUseCase {
+func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentStoreServiceScheduleRepository, storeRepo AppointmentStoreRepository, storeServiceRepo AppointmentStoreServiceRepository, paymentProcessor PaymentProcessor, paymentTransactionRepo PaymentTransactionRepository, paymentMethodSettingsRepo AppointmentPaymentMethodSettingsRepository, debtRepo AppointmentDebtRepository, log *slog.Logger) *AppointmentUseCase {
 	return &AppointmentUseCase{
 		repo:                      repo,
 		scheduleRepo:              scheduleRepo,
@@ -82,6 +93,7 @@ func NewAppointmentUseCase(repo AppointmentRepository, scheduleRepo AppointmentS
 		paymentProcessor:          paymentProcessor,
 		paymentTransactionRepo:    paymentTransactionRepo,
 		paymentMethodSettingsRepo: paymentMethodSettingsRepo,
+		debtRepo:                  debtRepo,
 		log:                       log,
 	}
 }
@@ -187,11 +199,14 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 		status = domain.AppointmentStatusConfirmed
 	}
 
-	// Every payment method starts pending: a cash_on_site payment stays pending until the store
-	// owner confirms it was received (see ConfirmCashPayment); a card_advance payment stays
-	// pending until a charge is attempted, immediately below or later at manual confirmation
-	// (see UpdateStatus).
+	// cash_on_site opens a debt immediately rather than waiting on a manual confirmation: the
+	// service is booked and the money is owed to the store until PayDebt settles it. A
+	// card_advance payment stays pending until a charge is attempted, immediately below or later
+	// at manual confirmation (see UpdateStatus).
 	paymentStatus := domain.PaymentStatusPending
+	if paymentMethod == domain.PaymentMethodCashOnSite {
+		paymentStatus = domain.PaymentStatusOwed
+	}
 
 	appointment := domain.NewAppointment(storeID, serviceID, userID, status, paymentMethod, paymentStatus, startTime, endTime)
 
@@ -228,14 +243,49 @@ func (usecase *AppointmentUseCase) Create(ctx context.Context, storeID, serviceI
 	amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
 	usecase.recordPaymentTransaction(ctx, appointment.ID, amount, paymentMethod, transactionStatus, failureReason)
 
+	if paymentMethod == domain.PaymentMethodCashOnSite {
+		// Best-effort, same trade-off as recordPaymentTransaction above: the appointment row
+		// (payment_status = owed, already committed) is the primary record that money is owed;
+		// failing the booking itself over a debt-ledger write would be worse than a logged gap.
+		if err := usecase.debtRepo.AddDebt(ctx, userID, storeID, appointment.ID, amount); err != nil {
+			usecase.log.Error("failed to open debt for cash_on_site appointment", slog.String("appointment_id", appointment.ID), slog.Any("error", err))
+		}
+	}
+
 	return appointment, nil
 }
 
-// ConfirmCashPayment marks a cash_on_site appointment's payment as received. Only the store
-// owner may call this, and only while the payment is still pending: a card_advance appointment,
-// or one already paid/failed, is rejected with domain.ErrInvalidInput since there's nothing to
-// confirm this way.
-func (usecase *AppointmentUseCase) ConfirmCashPayment(ctx context.Context, appointmentID, requesterUserID string) (*domain.Appointment, error) {
+// reverseDebtIfOwed removes the debt opened by a cash_on_site appointment that is being
+// cancelled before its money was ever collected, best-effort (same trade-off documented at the
+// AddDebt call site in Create): appointment.Status = cancelled, already committed, is what makes
+// the appointment moot; a logged gap here is better than failing the cancellation itself.
+func (usecase *AppointmentUseCase) reverseDebtIfOwed(ctx context.Context, appointment *domain.Appointment, store *domain.Store) {
+	if appointment.PaymentMethod != domain.PaymentMethodCashOnSite || appointment.PaymentStatus != domain.PaymentStatusOwed {
+		return
+	}
+
+	service, err := usecase.storeServiceRepo.GetStoreServiceByID(ctx, appointment.ServiceID)
+	if err != nil {
+		usecase.log.Error("failed to resolve service to reverse debt", slog.String("appointment_id", appointment.ID), slog.Any("error", err))
+		return
+	}
+
+	amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
+	if err := usecase.debtRepo.ReverseDebt(ctx, appointment.UserID, appointment.StoreID, appointment.ID, amount); err != nil {
+		usecase.log.Error("failed to reverse debt for cancelled cash_on_site appointment", slog.String("appointment_id", appointment.ID), slog.Any("error", err))
+	}
+}
+
+// PayDebt confirms that a cash_on_site appointment's debt was collected, settling exactly that
+// appointment's own price against the client's aggregate debt with the store and marking the
+// appointment as paid. Only the store owner may call this, and only while the appointment still
+// has an open debt (payment_status == owed); paid must be true, since there's nothing to settle
+// otherwise.
+func (usecase *AppointmentUseCase) PayDebt(ctx context.Context, appointmentID, requesterUserID string, paid bool) (*domain.Appointment, error) {
+	if !paid {
+		return nil, fmt.Errorf("%w: paid must be true to settle this appointment's debt", domain.ErrInvalidInput)
+	}
+
 	appointment, err := usecase.repo.GetAppointmentByID(ctx, appointmentID)
 	if err != nil {
 		return nil, fmt.Errorf("getting appointment: %w", err)
@@ -247,28 +297,28 @@ func (usecase *AppointmentUseCase) ConfirmCashPayment(ctx context.Context, appoi
 	}
 
 	if store.UserID != requesterUserID {
-		return nil, fmt.Errorf("%w: only the store owner can confirm a cash payment", domain.ErrForbidden)
+		return nil, fmt.Errorf("%w: only the store owner can settle a cash payment debt", domain.ErrForbidden)
 	}
 
 	if appointment.PaymentMethod != domain.PaymentMethodCashOnSite {
-		return nil, fmt.Errorf("%w: only a cash_on_site appointment's payment can be confirmed this way", domain.ErrInvalidInput)
+		return nil, fmt.Errorf("%w: only a cash_on_site appointment can have its debt settled this way", domain.ErrInvalidInput)
 	}
 
-	if appointment.PaymentStatus != domain.PaymentStatusPending {
-		return nil, fmt.Errorf("%w: payment is not pending confirmation", domain.ErrInvalidInput)
-	}
-
-	updated, err := usecase.repo.UpdatePaymentStatus(ctx, appointmentID, domain.PaymentStatusPaid)
-	if err != nil {
-		return nil, fmt.Errorf("confirming cash payment: %w", err)
+	if appointment.PaymentStatus != domain.PaymentStatusOwed {
+		return nil, fmt.Errorf("%w: this appointment has no open debt to settle", domain.ErrInvalidInput)
 	}
 
 	service, err := usecase.storeServiceRepo.GetStoreServiceByID(ctx, appointment.ServiceID)
 	if err != nil {
 		return nil, fmt.Errorf("getting store service: %w", err)
 	}
-
 	amount := domain.ApplyPercentageFee(service.Price, store.AppUsageFeePercentage)
+
+	updated, err := usecase.debtRepo.SettleDebt(ctx, appointment.UserID, appointment.StoreID, appointmentID, amount)
+	if err != nil {
+		return nil, fmt.Errorf("settling debt: %w", err)
+	}
+
 	usecase.recordPaymentTransaction(ctx, appointmentID, amount, domain.PaymentMethodCashOnSite, domain.PaymentStatusPaid, "")
 
 	return updated, nil
@@ -616,6 +666,8 @@ func (usecase *AppointmentUseCase) Cancel(ctx context.Context, appointmentID, re
 		return nil, fmt.Errorf("cancelling appointment: %w", err)
 	}
 
+	usecase.reverseDebtIfOwed(ctx, appointment, store)
+
 	return cancelled, nil
 }
 
@@ -681,6 +733,10 @@ func (usecase *AppointmentUseCase) UpdateStatus(ctx context.Context, appointment
 	updated, err := usecase.repo.UpdateAppointmentStatus(ctx, appointmentID, newStatus, reason)
 	if err != nil {
 		return nil, fmt.Errorf("updating appointment status: %w", err)
+	}
+
+	if newStatus == domain.AppointmentStatusCancelled {
+		usecase.reverseDebtIfOwed(ctx, appointment, store)
 	}
 
 	return updated, nil

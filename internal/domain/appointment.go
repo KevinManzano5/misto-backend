@@ -24,6 +24,10 @@ const (
 	PaymentStatusPending = "pending"
 	PaymentStatusPaid    = "paid"
 	PaymentStatusFailed  = "failed"
+	// PaymentStatusOwed means a cash_on_site appointment's service was booked but the money was
+	// not received: a debt was opened for the client at this store (see domain.UserDebt) instead
+	// of waiting on a manual confirmation.
+	PaymentStatusOwed = "owed"
 )
 
 // Appointment struct
